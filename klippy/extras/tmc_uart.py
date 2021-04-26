@@ -214,6 +214,7 @@ class MCU_TMC_uart:
         self.instance_id, self.addr, self.mcu_uart = lookup_tmc_uart_bitbang(
             config, max_addr)
         self.mutex = self.mcu_uart.mutex
+        self.last_state = {}
     def get_fields(self):
         return self.fields
     def _do_get_register(self, reg_name):
@@ -223,12 +224,17 @@ class MCU_TMC_uart:
         for retry in range(5):
             val = self.mcu_uart.reg_read(self.instance_id, self.addr, reg)
             if val is not None:
+                self.last_state.update({reg_name: val})
                 return val
         raise self.printer.command_error(
             "Unable to read tmc uart '%s' register %s" % (self.name, reg_name))
     def get_register(self, reg_name):
         with self.mutex:
             return self._do_get_register(reg_name)
+    def get_last_register(self, reg_name):
+        if reg_name in self.last_state:
+            return self.last_state[reg_name]
+        return 0
     def set_register(self, reg_name, val, print_time=None):
         reg = self.name_to_reg[reg_name]
         if self.printer.get_start_args().get('debugoutput') is not None:

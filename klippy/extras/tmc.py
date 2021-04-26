@@ -332,14 +332,14 @@ class TMCCommandHelper:
 
         queried_registers = {}
         for reg_name in self.read_registers:
-            val = self.mcu_tmc.get_register(reg_name)
+            val = self.mcu_tmc.get_last_register(reg_name)
             if self.read_translate is not None:
                 reg_name, val = self.read_translate(reg_name, val)
             queried_registers.update({reg_name: self.fields.pretty_output(reg_name, val)})
 
         return {
             "write_only_registers": write_only_registers,
-            "queried_registers": queried_registers,
+            "queried_registers": queried_registers
         }
 
 
