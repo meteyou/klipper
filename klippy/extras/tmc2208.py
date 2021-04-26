@@ -189,8 +189,8 @@ class TMC2208:
         self.mcu_tmc = tmc_uart.MCU_TMC_uart(config, Registers, self.fields)
         # Register commands
         current_helper = tmc2130.TMCCurrentHelper(config, self.mcu_tmc)
-        cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
-        cmdhelper.setup_register_dump(ReadRegisters, self.read_translate)
+        self.cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
+        self.cmdhelper.setup_register_dump(ReadRegisters, self.read_translate)
         # Setup basic register values
         self.fields.set_field("pdn_disable", True)
         self.fields.set_field("mstep_reg_select", True)
@@ -219,6 +219,8 @@ class TMC2208:
             drv_type = self.fields.get_field("SEL_A", val)
             reg_name = "IOIN@TMC220x" if drv_type else "IOIN@TMC222x"
         return reg_name, val
+    def get_status(self, eventtime):
+        return self.cmdhelper.get_status(eventtime)
 
 def load_config_prefix(config):
     return TMC2208(config)

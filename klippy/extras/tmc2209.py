@@ -63,8 +63,8 @@ class TMC2209:
         tmc.TMCVirtualPinHelper(config, self.mcu_tmc)
         # Register commands
         current_helper = tmc2130.TMCCurrentHelper(config, self.mcu_tmc)
-        cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
-        cmdhelper.setup_register_dump(ReadRegisters)
+        self.cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
+        self.cmdhelper.setup_register_dump(ReadRegisters)
         # Setup basic register values
         self.fields.set_field("pdn_disable", True)
         self.fields.set_field("mstep_reg_select", True)
@@ -89,6 +89,8 @@ class TMC2209:
         set_config_field(config, "PWM_REG", 8)
         set_config_field(config, "PWM_LIM", 12)
         set_config_field(config, "SGTHRS", 0)
+    def get_status(self, eventtime):
+        return self.cmdhelper.get_status(eventtime)
 
 def load_config_prefix(config):
     return TMC2209(config)

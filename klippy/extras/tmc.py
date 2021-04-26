@@ -74,6 +74,21 @@ class FieldHelper:
             if sval and sval != "0":
                 fields.append(" %s=%s" % (field_name, sval))
         return "%-11s %08x%s" % (reg_name + ":", reg_value, "".join(fields))
+    def pretty_output(self, reg_name, reg_value):
+        # Provide a dict of a register
+        reg_fields = self.all_fields.get(reg_name, {})
+        reg_fields = sorted([(mask, name) for name, mask in reg_fields.items()])
+        fields = {}
+        for mask, field_name in reg_fields:
+            field_value = self.get_field(field_name, reg_value, reg_name)
+            sval = self.field_formatters.get(field_name, str)(field_value)
+            if sval and sval != "0":
+                fields.update({field_name: sval})
+
+        if len(fields):
+            return fields
+        else:
+            return str(reg_value)
 
 
 ######################################################################
@@ -308,6 +323,24 @@ class TMCCommandHelper:
             if self.read_translate is not None:
                 reg_name, val = self.read_translate(reg_name, val)
             gcmd.respond_info(self.fields.pretty_format(reg_name, val))
+
+    def get_status(self, eventtime):
+        write_only_registers = {}
+        for reg_name, val in self.fields.registers.items():
+            if reg_name not in self.read_registers:
+                write_only_registers.update({reg_name: self.fields.pretty_output(reg_name, val)})
+
+        queried_registers = {}
+        for reg_name in self.read_registers:
+            val = self.mcu_tmc.get_register(reg_name)
+            if self.read_translate is not None:
+                reg_name, val = self.read_translate(reg_name, val)
+            queried_registers.update({reg_name: self.fields.pretty_output(reg_name, val)})
+
+        return {
+            "write_only_registers": write_only_registers,
+            "queried_registers": queried_registers,
+        }
 
 
 ######################################################################

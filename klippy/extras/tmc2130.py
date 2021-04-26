@@ -258,8 +258,8 @@ class TMC2130:
         tmc.TMCVirtualPinHelper(config, self.mcu_tmc)
         # Register commands
         current_helper = TMCCurrentHelper(config, self.mcu_tmc)
-        cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
-        cmdhelper.setup_register_dump(ReadRegisters)
+        self.cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
+        self.cmdhelper.setup_register_dump(ReadRegisters)
         # Setup basic register values
         mh = tmc.TMCMicrostepHelper(config, self.mcu_tmc)
         self.get_microsteps = mh.get_microsteps
@@ -278,6 +278,8 @@ class TMC2130:
         set_config_field(config, "pwm_freq", 1)
         set_config_field(config, "pwm_autoscale", True)
         set_config_field(config, "sgt", 0)
+    def get_status(self, eventtime):
+        return self.cmdhelper.get_status(eventtime)
 
 def load_config_prefix(config):
     return TMC2130(config)

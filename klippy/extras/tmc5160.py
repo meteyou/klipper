@@ -292,8 +292,8 @@ class TMC5160:
         tmc.TMCVirtualPinHelper(config, self.mcu_tmc)
         # Register commands
         current_helper = TMC5160CurrentHelper(config, self.mcu_tmc)
-        cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
-        cmdhelper.setup_register_dump(ReadRegisters)
+        self.cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
+        self.cmdhelper.setup_register_dump(ReadRegisters)
         # Setup basic register values
         mh = tmc.TMCMicrostepHelper(config, self.mcu_tmc)
         self.get_microsteps = mh.get_microsteps
@@ -334,6 +334,8 @@ class TMC5160:
         set_config_field(config, "PWM_LIM", 12)
         #   TPOWERDOWN
         set_config_field(config, "TPOWERDOWN", 10)
+    def get_status(self, eventtime):
+        return self.cmdhelper.get_status(eventtime)
 
 def load_config_prefix(config):
     return TMC5160(config)
