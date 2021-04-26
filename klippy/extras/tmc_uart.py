@@ -234,7 +234,7 @@ class MCU_TMC_uart:
     def get_last_register(self, reg_name):
         if reg_name in self.last_state:
             return self.last_state[reg_name]
-        return 0
+        return None
     def set_register(self, reg_name, val, print_time=None):
         reg = self.name_to_reg[reg_name]
         if self.printer.get_start_args().get('debugoutput') is not None:
