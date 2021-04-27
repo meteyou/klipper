@@ -227,13 +227,19 @@ class MCU_TMC_SPI:
         self.mutex = self.tmc_spi.mutex
         self.name_to_reg = name_to_reg
         self.fields = fields
+        self.last_state = {}
     def get_fields(self):
         return self.fields
     def get_register(self, reg_name):
         reg = self.name_to_reg[reg_name]
         with self.mutex:
             read = self.tmc_spi.reg_read(reg, self.chain_pos)
+            self.last_state.update({reg_name: read})
         return read
+    def get_last_register(self, reg_name):
+        if reg_name in self.last_state:
+            return self.last_state[reg_name]
+        return None
     def set_register(self, reg_name, val, print_time=None):
         reg = self.name_to_reg[reg_name]
         with self.mutex:
