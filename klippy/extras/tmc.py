@@ -338,7 +338,14 @@ class TMCCommandHelper:
                     reg_name, val = self.read_translate(reg_name, val)
                 queried_registers.update({reg_name: self.fields.pretty_output(reg_name, val)})
 
+        [run_current, hold_current, max_current] = self.current_helper.get_current()
+
         return {
+            "currents": {
+                "run_current": run_current,
+                "hold_current": hold_current,
+                "max_current": max_current,
+            },
             "write_only_registers": write_only_registers,
             "queried_registers": queried_registers
         }
