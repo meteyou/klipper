@@ -188,6 +188,7 @@ class MCU_TMC2660_SPI:
         self.spi = bus.MCU_SPI_from_config(config, 0, default_speed=4000000)
         self.name_to_reg = name_to_reg
         self.fields = fields
+        self.last_state = {}
     def get_fields(self):
         return self.fields
     def get_register(self, reg_name):
@@ -204,7 +205,13 @@ class MCU_TMC2660_SPI:
                 self.spi.spi_send(msg)
             params = self.spi.spi_transfer(msg)
         pr = bytearray(params['response'])
-        return (pr[0] << 16) | (pr[1] << 8) | pr[2]
+        output = (pr[0] << 16) | (pr[1] << 8) | pr[2]
+        self.last_state.update({reg_name: output})
+        return output
+    def get_last_register(self, reg_name):
+        if reg_name in self.last_state:
+            return self.last_state[reg_name]
+        return None
     def set_register(self, reg_name, val, print_time=None):
         minclock = 0
         if print_time is not None:
