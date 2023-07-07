@@ -36,12 +36,21 @@ CFLAGS += -flto -fwhole-program -fno-use-linker-plugin -ggdb3
 
 OBJS_klipper.elf = $(patsubst %.c, $(OUT)src/%.o,$(src-y))
 OBJS_klipper.elf += $(OUT)compile_time_request.o
-CFLAGS_klipper.elf = $(CFLAGS) -Wl,--gc-sections
+CFLAGS_klipper.elf = $(CFLAGS) -Wl,--gc-sections -Wl,-Map,out/klipper.map
 
 CPPFLAGS = -I$(OUT) -P -MD -MT $@
 
+bootloader_src-y = 
+bootloader_dirs-y = bootloader
+BOOTLOADER_CFLAGS := -I$(OUT) -I$(OUT)board -std=gnu11 -O2 -MD \
+					 -Wall -Wold-style-definition $(call cc-option,$(CC),-Wtype-limits,) \
+					 -ffunction-sections -fdata-sections -fno-delete-null-pointer-checks
+OBJS_bootloader.elf = $(patsubst %.c, $(OUT)bootloader/%.o,$(bootloader_src-y))
+CFLAGS_bootloader.elf = $(BOOTLOADER_CFLAGS) -Wl,--gc-sections
+
 # Default targets
 target-y := $(OUT)klipper.elf
+target-$(CONFIG_BOARD_INFO_CONFIGURE) +=$(OUT)bootloader.elf
 
 all:
 
@@ -53,9 +62,43 @@ Q=@
 MAKEFLAGS += --no-print-directory
 endif
 
+##### Process board hardware and firmware version
+
+ifeq ($(CONFIG_BOARD_INFO_CONFIGURE),y)
+
+ifeq ($(CONFIG_MAIN_MCU_BOARD),y)
+board_type := mcu
+else ifeq ($(CONFIG_NOZZLE_MCU_BOARD),y)
+board_type := noz
+else ifeq ($(CONFIG_BED_MCU_BOARD),y)
+board_type := bed
+endif
+
+ifneq ($(CONFIG_MCU_MENU),)
+mcu_menu := $(patsubst "%",%,$(CONFIG_MCU_MENU))
+else
+mcu_menu :=
+endif
+
+ifneq ($(CONFIG_MCU_TYPE),)
+mcu_type := $(patsubst "%",%,$(CONFIG_MCU_TYPE))
+else
+mcu_type :=
+endif
+
+board_hw_version := $(board_type)$(CONFIG_MCU_BOARD_ID)_$(CONFIG_MCU_BOARD_HW_VER)_$(mcu_menu)$(mcu_type)
+board_fw_version := $(board_type)$(CONFIG_MCU_BOARD_ID)_$(CONFIG_MCU_BOARD_FW_VER)_$(CONFIG_MCU_BOARD_FW_RESERVED)
+
+CFLAGS += -DBOARD_FW_VERSION=\"$(board_fw_version)\"
+BOOTLOADER_CFLAGS += -DBOARD_HW_VERSION=\"$(board_hw_version)\"
+
+export board_hw_version board_fw_version
+endif
+
 # Include board specific makefile
 include src/Makefile
 -include src/$(patsubst "%",%,$(CONFIG_BOARD_DIRECTORY))/Makefile
+-include src/bootloader/Makefile
 
 ################ Main build rules
 
@@ -71,6 +114,18 @@ $(OUT)klipper.elf: $(OBJS_klipper.elf)
 	@echo "  Linking $@"
 	$(Q)$(CC) $(OBJS_klipper.elf) $(CFLAGS_klipper.elf) -o $@
 	$(Q)scripts/check-gcc.sh $@ $(OUT)compile_time_request.o
+
+$(OUT)bootloader/src/generic/%.ld: src/bootloader/src/generic/%.lds.S $(OUT)autoconf.h
+	@echo "  Preprocessing $@"
+	$(Q)$(CPP) -I$(OUT) -P -MD -MT $@ $< -o $@
+
+$(OUT)bootloader/%.o: src/bootloader/%.c $(OUT)autoconf.h
+	@echo "  Compiling $@"
+	$(Q)$(CC) $(BOOTLOADER_CFLAGS) -c $< -o $@
+
+$(OUT)bootloader.elf: $(OBJS_bootloader.elf)
+	@echo " Linking $@"
+	$(Q)$(CC) $(OBJS_bootloader.elf) $(CFLAGS_bootloader.elf) -o $@
 
 ################ Compile time requests
 
@@ -89,6 +144,8 @@ create-board-link:
 	@echo "  Creating symbolic link $(OUT)board"
 	$(Q)mkdir -p $(addprefix $(OUT), $(dirs-y))
 	$(Q)rm -f $(OUT)*.d $(patsubst %,$(OUT)%/*.d,$(dirs-y))
+	$(Q)mkdir -p $(addprefix $(OUT), $(bootloader_dirs-y))
+	$(Q)rm -f $(patsubst %,$(OUT)%/*.d,$(bootloader_dirs-y))
 	$(Q)rm -f $(OUT)board
 	$(Q)ln -sf $(CURDIR)/src/$(CONFIG_BOARD_DIRECTORY) $(OUT)board
 	$(Q)mkdir -p $(OUT)board-generic
@@ -114,6 +171,12 @@ $(KCONFIG_CONFIG) olddefconfig: src/Kconfig
 
 menuconfig:
 	$(Q)$(PYTHON) lib/kconfiglib/menuconfig.py src/Kconfig
+	@echo "  Board HW Ver: $(board_hw_version)"
+	@echo "  Board FW Ver: $(board_fw_version)"
+
+%_defconfig: src/configs/%_defconfig
+	@echo "  Load configuration: $@"
+	$(Q)cp -v src/configs/$@ $(KCONFIG_CONFIG)
 
 ################ Generic rules
 

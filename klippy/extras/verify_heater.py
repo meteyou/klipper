@@ -86,7 +86,9 @@ class HeaterCheck:
     def heater_fault(self):
         msg = "Heater %s not heating at expected rate" % (self.heater_name,)
         logging.error(msg)
-        self.printer.invoke_shutdown(msg + HINT_THERMAL)
+        code_key = "key507"
+        m = """{"code":"%s","msg":"Heater %s not heating at expected rate"}""" % (code_key, self.heater_name)
+        self.printer.invoke_shutdown(m)
         return self.printer.get_reactor().NEVER
 
 def load_config_prefix(config):

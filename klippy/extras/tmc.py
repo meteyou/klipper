@@ -154,8 +154,9 @@ class TMCErrorCheck:
             count += 1
             if count >= 3:
                 fmt = self.fields.pretty_format(reg_name, val)
-                raise self.printer.command_error("TMC '%s' reports error: %s"
-                                                 % (self.stepper_name, fmt))
+                code_key = "key505"
+                m = """{"code":"%s","msg":"TMC '%s' reports error: %s"}""" % (code_key, self.stepper_name, fmt)
+                raise self.printer.command_error(m)
             if try_clear and val & err_mask:
                 try_clear = False
                 cleared_flags |= val & err_mask
@@ -500,6 +501,27 @@ class TMCVirtualPinHelper:
 ######################################################################
 # Config reading helpers
 ######################################################################
+
+# Helper to initialize the wave table from config or defaults
+def TMCWaveTableHelper(config, mcu_tmc):
+    set_config_field = mcu_tmc.get_fields().set_config_field
+    set_config_field(config, "mslut0", 0xAAAAB554)
+    set_config_field(config, "mslut1", 0x4A9554AA)
+    set_config_field(config, "mslut2", 0x24492929)
+    set_config_field(config, "mslut3", 0x10104222)
+    set_config_field(config, "mslut4", 0xFBFFFFFF)
+    set_config_field(config, "mslut5", 0xB5BB777D)
+    set_config_field(config, "mslut6", 0x49295556)
+    set_config_field(config, "mslut7", 0x00404222)
+    set_config_field(config, "w0", 2)
+    set_config_field(config, "w1", 1)
+    set_config_field(config, "w2", 1)
+    set_config_field(config, "w3", 1)
+    set_config_field(config, "x1", 128)
+    set_config_field(config, "x2", 255)
+    set_config_field(config, "x3", 255)
+    set_config_field(config, "start_sin", 0)
+    set_config_field(config, "start_sin90", 247)
 
 # Helper to configure and query the microstep settings
 def TMCMicrostepHelper(config, mcu_tmc):
