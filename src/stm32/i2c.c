@@ -32,6 +32,10 @@ DECL_CONSTANT_STR("BUS_PINS_i2c2a", "PH4,PH5");
 DECL_ENUMERATION("i2c_bus", "i2c3a", 5);
 DECL_CONSTANT_STR("BUS_PINS_i2c3a", "PH7,PH8");
   #endif
+  #if CONFIG_MACH_STM32F446
+DECL_ENUMERATION("i2c_bus", "fmpi2c1", 6);
+DECL_CONSTANT_STR("BUS_PINS_fmpi2c1", "PD14,PD15");
+  #endif
 #endif
 
 static const struct i2c_info i2c_bus[] = {
@@ -43,6 +47,9 @@ static const struct i2c_info i2c_bus[] = {
   #if CONFIG_MACH_STM32F2 || CONFIG_MACH_STM32F4x5
     { I2C2, GPIO('H', 4), GPIO('H', 5) },
     { I2C3, GPIO('H', 7), GPIO('H', 8) },
+  #endif
+  #if CONFIG_MACH_STM32F446
+    { FMPI2C1, GPIO('D', 14), GPIO('D', 15) },
   #endif
 #endif
 };
