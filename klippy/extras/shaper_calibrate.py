@@ -13,15 +13,14 @@ MAX_SHAPER_FREQ = 150.
 
 TEST_DAMPING_RATIOS=[0.075, 0.1, 0.15]
 
-AUTOTUNE_SHAPERS = ['zv', 'mzv', 'ei', '2hump_ei', '3hump_ei']
+AUTOTUNE_SHAPERS = ['zv', 'zvd', 'mzv', 'ei', '2hump_ei', '3hump_ei']
 
 ######################################################################
 # Frequency response calculation and shaper auto-tuning
 ######################################################################
 
 class CalibrationData:
-    def __init__(self, name, freq_bins, psd_sum, psd_x, psd_y, psd_z):
-        self.name = name
+    def __init__(self, freq_bins, psd_sum, psd_x, psd_y, psd_z):
         self.freq_bins = freq_bins
         self.psd_sum = psd_sum
         self.psd_x = psd_x
@@ -30,37 +29,33 @@ class CalibrationData:
         self._psd_list = [self.psd_sum, self.psd_x, self.psd_y, self.psd_z]
         self._psd_map = {'x': self.psd_x, 'y': self.psd_y, 'z': self.psd_z,
                          'all': self.psd_sum}
-        self._normalized = False
-        self.data_sets = []
+        self.data_sets = 1
     def add_data(self, other):
-        self.data_sets.extend(other.get_datasets())
+        np = self.numpy
+        joined_data_sets = self.data_sets + other.data_sets
+        for psd, other_psd in zip(self._psd_list, other._psd_list):
+            # `other` data may be defined at different frequency bins,
+            # interpolating to fix that.
+            other_normalized = other.data_sets * np.interp(
+                    self.freq_bins, other.freq_bins, other_psd)
+            psd *= self.data_sets
+            psd[:] = (psd + other_normalized) * (1. / joined_data_sets)
+        self.data_sets = joined_data_sets
     def set_numpy(self, numpy):
         self.numpy = numpy
     def normalize_to_frequencies(self):
-        if not self._normalized:
-            for psd in self._psd_list:
-                if psd is None:
-                    continue
-                # Avoid division by zero errors
-                psd /= self.freq_bins + .1
-                # Remove low-frequency noise
-                low_freqs = self.freq_bins < 2. * MIN_FREQ
-                psd[low_freqs] *= self.numpy.exp(
-                        -(2. * MIN_FREQ / (
-                            self.freq_bins[low_freqs] + .1))**2 + 1.)
-            self._normalized = True
-        for other in self.data_sets:
-            other.normalize_to_frequencies()
+        for psd in self._psd_list:
+            # Avoid division by zero errors
+            psd /= self.freq_bins + .1
+            # Remove low-frequency noise
+            psd[self.freq_bins < MIN_FREQ] = 0.
     def get_psd(self, axis='all'):
         return self._psd_map[axis]
-    def get_datasets(self):
-        return [self] + self.data_sets
 
 
 CalibrationResult = collections.namedtuple(
         'CalibrationResult',
-        ('name', 'freq', 'freq_bins', 'vals', 'vibrs',
-         'smoothing', 'score', 'max_accel'))
+        ('name', 'freq', 'vals', 'vibrs', 'smoothing', 'score', 'max_accel'))
 
 class ShaperCalibrate:
     def __init__(self, printer):
@@ -87,13 +82,7 @@ class ShaperCalibrate:
                 child_conn.send((True, traceback.format_exc()))
                 child_conn.close()
                 return
-            if isinstance(res, list):
-                child_conn.send((True, None))
-                for el in res:
-                    child_conn.send((False, el))
-                child_conn.send((True, None))
-            else:
-                child_conn.send((False, res))
+            child_conn.send((False, res))
             child_conn.close()
         # Start a process to perform the calculation
         calc_proc = multiprocessing.Process(target=wrapper)
@@ -103,24 +92,15 @@ class ShaperCalibrate:
         reactor = self.printer.get_reactor()
         gcode = self.printer.lookup_object("gcode")
         eventtime = last_report_time = reactor.monotonic()
-        while calc_proc.is_alive() and not parent_conn.poll():
+        while calc_proc.is_alive():
             if eventtime > last_report_time + 5.:
                 last_report_time = eventtime
                 gcode.respond_info("Wait for calculations..", log=False)
             eventtime = reactor.pause(eventtime + .1)
         # Return results
-        status, recv = parent_conn.recv()
-        if recv is None:
-            res = []
-            while True:
-                status, recv = parent_conn.recv()
-                if status:
-                    break
-                res.append(recv)
-        else:
-            res = recv
-        if status and recv is not None:
-            raise self.error("Error in remote calculation: %s" % (recv,))
+        is_err, res = parent_conn.recv()
+        if is_err:
+            raise self.error("Error in remote calculation: %s" % (res,))
         calc_proc.join()
         parent_conn.close()
         return res
@@ -165,7 +145,7 @@ class ShaperCalibrate:
         freqs = np.fft.rfftfreq(nfft, 1. / fs)
         return freqs, psd
 
-    def calc_freq_response(self, name, raw_values):
+    def calc_freq_response(self, raw_values):
         np = self.numpy
         if raw_values is None:
             return None
@@ -190,11 +170,11 @@ class ShaperCalibrate:
         fx, px = self._psd(data[:,1], SAMPLING_FREQ, M)
         fy, py = self._psd(data[:,2], SAMPLING_FREQ, M)
         fz, pz = self._psd(data[:,3], SAMPLING_FREQ, M)
-        return CalibrationData(name, fx, px+py+pz, px, py, pz)
+        return CalibrationData(fx, px+py+pz, px, py, pz)
 
-    def process_accelerometer_data(self, name, data):
+    def process_accelerometer_data(self, data):
         calibration_data = self.background_process_exec(
-                self.calc_freq_response, (name, data))
+                self.calc_freq_response, (data,))
         if calibration_data is None:
             raise self.error(
                     "Internal error processing accelerometer data %s" % (data,))
@@ -268,50 +248,36 @@ class ShaperCalibrate:
 
         max_freq = max(max_freq or MAX_FREQ, test_freqs.max())
 
+        freq_bins = calibration_data.freq_bins
+        psd = calibration_data.psd_sum[freq_bins <= max_freq]
+        freq_bins = freq_bins[freq_bins <= max_freq]
+
         best_res = None
         results = []
-        min_freq = max_freq
-        for data in calibration_data.get_datasets():
-            min_freq = min(min_freq, data.freq_bins.min())
         for test_freq in test_freqs[::-1]:
             shaper_vibrations = 0.
+            shaper_vals = np.zeros(shape=freq_bins.shape)
             shaper = shaper_cfg.init_func(test_freq, damping_ratio)
             shaper_smoothing = self._get_shaper_smoothing(shaper, scv=scv)
             if max_smoothing and shaper_smoothing > max_smoothing and best_res:
-                return [best_res] + results
+                return best_res
+            # Exact damping ratio of the printer is unknown, pessimizing
+            # remaining vibrations over possible damping values
+            for dr in test_damping_ratios:
+                vibrations, vals = self._estimate_remaining_vibrations(
+                        shaper, dr, freq_bins, psd)
+                shaper_vals = np.maximum(shaper_vals, vals)
+                if vibrations > shaper_vibrations:
+                    shaper_vibrations = vibrations
             max_accel = self.find_shaper_max_accel(shaper, scv)
-            all_shaper_vals = []
-
-            for data in calibration_data.get_datasets():
-                freq_bins = data.freq_bins
-                psd = data.psd_sum[freq_bins <= max_freq]
-                freq_bins = freq_bins[freq_bins <= max_freq]
-
-                shaper_vals = np.zeros(shape=freq_bins.shape)
-                # Exact damping ratio of the printer is unknown, pessimizing
-                # remaining vibrations over possible damping values
-                for dr in test_damping_ratios:
-                    vibrations, vals = self._estimate_remaining_vibrations(
-                            shaper, dr, freq_bins, psd)
-                    shaper_vals = np.maximum(shaper_vals, vals)
-                    if vibrations > shaper_vibrations:
-                        shaper_vibrations = vibrations
-                all_shaper_vals.append((freq_bins, shaper_vals))
             # The score trying to minimize vibrations, but also accounting
             # the growth of smoothing. The formula itself does not have any
             # special meaning, it simply shows good results on real user data
             shaper_score = shaper_smoothing * (shaper_vibrations**1.5 +
                                                shaper_vibrations * .2 + .01)
-            shaper_freq_bins = np.arange(min_freq, max_freq, 0.2)
-            shaper_vals = np.zeros(shape=shaper_freq_bins.shape)
-            for freq_bins, vals in all_shaper_vals:
-                shaper_vals = np.maximum(
-                        shaper_vals, np.interp(shaper_freq_bins,
-                                               freq_bins, vals))
             results.append(
                     CalibrationResult(
-                        name=shaper_cfg.name, freq=test_freq,
-                        freq_bins=shaper_freq_bins, vals=shaper_vals,
+                        name=shaper_cfg.name, freq=test_freq, vals=shaper_vals,
                         vibrs=shaper_vibrations, smoothing=shaper_smoothing,
                         score=shaper_score, max_accel=max_accel))
             if best_res is None or best_res.vibrs > results[-1].vibrs:
@@ -321,10 +287,9 @@ class ShaperCalibrate:
         # much worse than the 'best' one, but gives much less smoothing
         selected = best_res
         for res in results[::-1]:
-            if res.vibrs < best_res.vibrs * 1.1 + .0005 \
-                    and res.score < selected.score:
+            if res.vibrs < best_res.vibrs * 1.1 and res.score < selected.score:
                 selected = res
-        return [selected] + results
+        return selected
 
     def _bisect(self, func):
         left = right = 1.
@@ -362,46 +327,34 @@ class ShaperCalibrate:
         for shaper_cfg in shaper_defs.INPUT_SHAPERS:
             if shaper_cfg.name not in shapers:
                 continue
-            fit_results = self.background_process_exec(self.fit_shaper, (
+            shaper = self.background_process_exec(self.fit_shaper, (
                 shaper_cfg, calibration_data, shaper_freqs, damping_ratio,
                 scv, max_smoothing, test_damping_ratios, max_freq))
-            shaper = fit_results[0]
-            results = fit_results[1:]
+            if logger is not None:
+                logger("Fitted shaper '%s' frequency = %.1f Hz "
+                       "(vibrations = %.1f%%, smoothing ~= %.3f, score = %.6f)" % (
+                           shaper.name, shaper.freq, shaper.vibrs * 100.,
+                           shaper.smoothing, shaper.score))
+                logger("To avoid too much smoothing with '%s', suggested "
+                       "max_accel <= %.0f mm/sec^2" % (
+                           shaper.name, round(shaper.max_accel / 100.) * 100.))
+            all_shapers.append(shaper)
             if (best_shaper is None or shaper.score * 1.2 < best_shaper.score or
                     (shaper.score * 1.05 < best_shaper.score and
                         shaper.smoothing * 1.1 < best_shaper.smoothing)):
                 # Either the shaper significantly improves the score (by 20%),
                 # or it improves the score and smoothing (by 5% and 10% resp.)
                 best_shaper = shaper
-            for s in results[::-1]:
-                if s.vibrs < best_shaper.vibrs and \
-                        s.smoothing < best_shaper.smoothing:
-                    best_shaper = shaper = s
-            if logger is not None:
-                logger("Fitted shaper '%s' frequency = %.1f Hz "
-                       "(vibrations = %.1f%%, smoothing ~= %.3f)" % (
-                           shaper.name, shaper.freq, shaper.vibrs * 100.,
-                           shaper.smoothing))
-                logger("To avoid too much smoothing with '%s', suggested "
-                       "max_accel <= %.0f mm/sec^2" % (
-                           shaper.name, round(shaper.max_accel / 100.) * 100.))
-            all_shapers.append(shaper)
-        if best_shaper.name == 'zv':
-            for tuned_shaper in all_shapers:
-                if tuned_shaper.name != 'zv' and \
-                        tuned_shaper.vibrs * 1.1 < best_shaper.vibrs:
-                    best_shaper = tuned_shaper
-                    break
         return best_shaper, all_shapers
 
-    def save_params(self, configfile, axis, shaper_name, shaper_freq):
-        if axis == 'xy':
-            self.save_params(configfile, 'x', shaper_name, shaper_freq)
-            self.save_params(configfile, 'y', shaper_name, shaper_freq)
-        else:
-            configfile.set('input_shaper', 'shaper_type_'+axis, shaper_name)
-            configfile.set('input_shaper', 'shaper_freq_'+axis,
-                           '%.1f' % (shaper_freq,))
+    # def save_params(self, configfile, axis, shaper_name, shaper_freq):
+    #     if axis == 'xy':
+    #         self.save_params(configfile, 'x', shaper_name, shaper_freq)
+    #         self.save_params(configfile, 'y', shaper_name, shaper_freq)
+    #     else:
+    #         configfile.set('input_shaper', 'shaper_type_'+axis, shaper_name)
+    #         configfile.set('input_shaper', 'shaper_freq_'+axis,
+    #                        '%.1f' % (shaper_freq,))
 
     def apply_params(self, input_shaper, axis, shaper_name, shaper_freq):
         if axis == 'xy':
@@ -415,56 +368,27 @@ class ShaperCalibrate:
                     "SHAPER_TYPE_" + axis: shaper_name,
                     "SHAPER_FREQ_" + axis: shaper_freq}))
 
-    def _escape_for_csv(self, name):
-        name = name.replace('"', '""')
-        if ',' in name:
-            return '"' + name + '"'
-        return name
-
     def save_calibration_data(self, output, calibration_data, shapers=None,
                               max_freq=None):
         try:
-            np = calibration_data.numpy
-            datasets = calibration_data.get_datasets()
             max_freq = max_freq or MAX_FREQ
-            if len(datasets) > 1:
-                if shapers:
-                    freq_bins = shapers[0].freq_bins
-                else:
-                    min_freq = max_freq
-                    for data in datasets:
-                        min_freq = min(min_freq, data.freq_bins.min())
-                    freq_bins = np.arange(min_freq, max_freq, 0.2)
-                psd_data_to_write = []
-                for data in datasets:
-                    psd_data_to_write.append(np.interp(
-                        freq_bins, data.freq_bins, data.psd_sum))
-            else:
-                freq_bins = calibration_data.freq_bins
-                psd_data_to_write = [
-                        calibration_data.psd_x, calibration_data.psd_y,
-                        calibration_data.psd_z, calibration_data.psd_sum]
             with open(output, "w") as csvfile:
-                csvfile.write("freq,")
-                if len(datasets) > 1:
-                    csvfile.write(','.join([self._escape_for_csv(d.name)
-                                            for d in datasets]))
-                else:
-                    csvfile.write("psd_x,psd_y,psd_z,psd_xyz")
+                csvfile.write("freq,psd_x,psd_y,psd_z,psd_xyz")
                 if shapers:
-                    csvfile.write(',shapers:')
                     for shaper in shapers:
                         csvfile.write(",%s(%.1f)" % (shaper.name, shaper.freq))
                 csvfile.write("\n")
-                num_freqs = freq_bins.shape[0]
+                num_freqs = calibration_data.freq_bins.shape[0]
                 for i in range(num_freqs):
-                    if freq_bins[i] >= max_freq:
+                    if calibration_data.freq_bins[i] >= max_freq:
                         break
-                    csvfile.write("%.1f" % freq_bins[i])
-                    for psd in psd_data_to_write:
-                        csvfile.write(",%.3e" % psd[i])
+                    csvfile.write("%.1f,%.3e,%.3e,%.3e,%.3e" % (
+                        calibration_data.freq_bins[i],
+                        calibration_data.psd_x[i],
+                        calibration_data.psd_y[i],
+                        calibration_data.psd_z[i],
+                        calibration_data.psd_sum[i]))
                     if shapers:
-                        csvfile.write(',')
                         for shaper in shapers:
                             csvfile.write(",%.3f" % (shaper.vals[i],))
                     csvfile.write("\n")

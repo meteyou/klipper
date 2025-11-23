@@ -84,8 +84,43 @@ class HeaterCheck:
         self.last_target = target
         return eventtime + 1.
     def heater_fault(self):
-        msg = "Heater %s not heating at expected rate" % (self.heater_name,)
+        if self.heater is not None:
+            temp, target = self.heater.smoothed_temp, self.heater.target_temp
+            msg = "Heater %s not heating at expected rate, temp: %.2f target: %.2f" % (self.heater_name, temp, target)
+        else:
+            msg = "Heater %s not heating at expected rate" % (self.heater_name,)
+        heater_index = 0
+        heater_type = "unknown"
+        import re
+        extruder_match = re.search(r'(extruder\d*)', self.heater_name)
+        if extruder_match:
+            found_heater = extruder_match.group(1)
+            extruder_num = found_heater.replace('extruder', '')
+            if extruder_num == '':
+                heater_index = 0
+            else:
+                heater_index = int(extruder_num)
+            heater_type = "extruder"
+        elif self.heater_name == 'heater_bed':
+            heater_type = "heater_bed"
+        elif self.heater_name.startswith('extruder'):
+            extruder_num = self.heater_name.replace('extruder', '')
+            if extruder_num == '':
+                heater_index = 0
+            else:
+                heater_index = int(extruder_num)
+            heater_type = "extruder"
+
+        if heater_type == "extruder":
+            id, index, code = 523, heater_index, 3
+        elif heater_type == "heater_bed":
+            id, index, code = 526, 0, 1
+        else:
+            id, index, code = 522, 0, 15
+        coded, oneshot, is_persistent = f"0003-{id:04d}-{index:04d}-{code:04d}", 0, 0
+        msg = '{"coded": "%s", "oneshot": %d, "msg":"%s"}' % (coded, 0, msg.replace('"',"'"))
         logging.error(msg)
+        self.printer.set_extruder_power('off')
         self.printer.invoke_shutdown(msg + HINT_THERMAL)
         return self.printer.get_reactor().NEVER
 

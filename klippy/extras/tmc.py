@@ -5,7 +5,6 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging, collections
 import stepper
-from . import bulk_sensor
 
 
 ######################################################################
@@ -161,8 +160,10 @@ class TMCErrorCheck:
             count += 1
             if count >= 3:
                 fmt = self.fields.pretty_format(reg_name, val)
-                raise self.printer.command_error("TMC '%s' reports error: %s"
-                                                 % (self.stepper_name, fmt))
+                err_msg = '{"coded": "0003-0522-0000-0011", "oneshot": 0, "msg":"%s"}' % ("TMC '%s' reports error: %s" % (self.stepper_name, fmt))
+                raise self.printer.command_error(err_msg)
+                # raise self.printer.command_error("TMC '%s' reports error: %s"
+                #                                  % (self.stepper_name, fmt))
             if try_clear and val & err_mask:
                 try_clear = False
                 cleared_flags |= val & err_mask
@@ -213,103 +214,13 @@ class TMCErrorCheck:
             return {'drv_status': None, 'temperature': None}
         temp = None
         if self.adc_temp is not None:
-            temp = round((self.adc_temp - 2038) / 7.7, 2)
+            temp = round((self.adc_temp - 2038) / 7.7, 0)
         last_value, reg_name = self.drv_status_reg_info[:2]
         if last_value != self.last_drv_status:
             self.last_drv_status = last_value
             fields = self.fields.get_reg_fields(reg_name, last_value)
             self.last_drv_fields = {n: v for n, v in fields.items() if v}
         return {'drv_status': self.last_drv_fields, 'temperature': temp}
-
-######################################################################
-# Record driver status
-######################################################################
-
-class TMCStallguardDump:
-    def __init__(self, config, mcu_tmc):
-        self.printer = config.get_printer()
-        self.stepper_name = ' '.join(config.get_name().split()[1:])
-        self.mcu_tmc = mcu_tmc
-        self.mcu = self.mcu_tmc.get_mcu()
-        self.fields = self.mcu_tmc.get_fields()
-        self.sg2_supp = False
-        self.sg4_reg_name = None
-        # It is possible to support TMC2660, just disable it for now
-        if not self.fields.all_fields.get("DRV_STATUS", None):
-            return
-        # Collect driver capabilities
-        if self.fields.all_fields["DRV_STATUS"].get("sg_result", None):
-            self.sg2_supp = True
-        # New drivers have separate register for SG4 result
-        if self.mcu_tmc.name_to_reg.get("SG_RESULT", 0):
-            self.sg4_reg_name = "SG_RESULT"
-        # 2240 supports both SG2 & SG4
-        if self.sg4_reg_name is None:
-            if self.mcu_tmc.name_to_reg.get("SG4_RESULT", 0):
-                self.sg4_reg_name = "SG4_RESULT"
-        # TMC2208
-        if self.sg2_supp is None and self.sg4_reg_name is None:
-            return
-        self.optimized_spi = False
-        # Bulk API
-        self.samples = []
-        self.query_timer = None
-        self.error = None
-        self.batch_bulk = bulk_sensor.BatchBulkHelper(
-            self.printer, self._dump, self._start, self._stop)
-        api_resp = {'header': ('time', 'sg_result', 'cs_actual')}
-        self.batch_bulk.add_mux_endpoint("tmc/stallguard_dump", "name",
-                                         self.stepper_name, api_resp)
-    def _start(self):
-        self.error = None
-        status = self.mcu_tmc.get_register_raw("DRV_STATUS")
-        if status.get("spi_status"):
-            self.optimized_spi = True
-        reactor = self.printer.get_reactor()
-        self.query_timer = reactor.register_timer(self._query_tmc,
-                                                  reactor.NOW)
-    def _stop(self):
-        self.printer.get_reactor().unregister_timer(self.query_timer)
-        self.query_timer = None
-        self.samples = []
-    def _query_tmc(self, eventtime):
-        sg_result = -1
-        cs_actual = -1
-        recv_time = eventtime
-        try:
-            if self.optimized_spi or self.sg4_reg_name == "SG4_RESULT":
-                #TMC2130/TMC5160/TMC2240
-                status = self.mcu_tmc.get_register_raw("DRV_STATUS")
-                reg_val = status["data"]
-                cs_actual = self.fields.get_field("cs_actual", reg_val)
-                sg_result = self.fields.get_field("sg_result", reg_val)
-                is_stealth = self.fields.get_field("stealth", reg_val)
-                recv_time = status["#receive_time"]
-                if is_stealth and self.sg4_reg_name == "SG4_RESULT":
-                    sg4_ret = self.mcu_tmc.get_register_raw("SG4_RESULT")
-                    sg_result = sg4_ret["data"]
-                    recv_time = sg4_ret["#receive_time"]
-            else:
-                # TMC2209
-                if self.sg4_reg_name == "SG_RESULT":
-                    sg4_ret = self.mcu_tmc.get_register_raw("SG_RESULT")
-                    sg_result = sg4_ret["data"]
-                    recv_time = sg4_ret["#receive_time"]
-        except self.printer.command_error as e:
-            self.error = e
-            return self.printer.get_reactor().NEVER
-        print_time = self.mcu.estimated_print_time(recv_time)
-        self.samples.append((print_time, sg_result, cs_actual))
-        if self.optimized_spi:
-            return eventtime + 0.001
-        # UART queried as fast as possible
-        return eventtime + 0.005
-    def _dump(self, eventtime):
-            if self.error:
-                raise self.error
-            samples = self.samples
-            self.samples = []
-            return {"data": samples}
 
 
 ######################################################################
@@ -324,7 +235,6 @@ class TMCCommandHelper:
         self.mcu_tmc = mcu_tmc
         self.current_helper = current_helper
         self.echeck_helper = TMCErrorCheck(config, mcu_tmc)
-        self.record_helper = TMCStallguardDump(config, mcu_tmc)
         self.fields = mcu_tmc.get_fields()
         self.read_registers = self.read_translate = None
         self.toff = None

@@ -200,21 +200,12 @@ class MCU_TMC_SPI_chain:
         cmd = self._build_cmd([reg, 0x00, 0x00, 0x00, 0x00], chain_pos)
         self.spi.spi_send(cmd)
         if self.printer.get_start_args().get('debugoutput') is not None:
-            return {
-                "spi_status": 0,
-                "data": 0,
-                "#receive_time": .0,
-            }
+            return 0
         params = self.spi.spi_transfer(cmd)
         pr = bytearray(params['response'])
         pr = pr[(self.chain_len - chain_pos) * 5 :
                 (self.chain_len - chain_pos + 1) * 5]
-        return {
-            "spi_status": pr[0],
-            "data": (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4],
-            "#receive_time": params["#receive_time"],
-        }
-
+        return (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4]
     def reg_write(self, reg, val, chain_pos, print_time=None):
         minclock = 0
         if print_time is not None:
@@ -232,8 +223,6 @@ class MCU_TMC_SPI_chain:
         pr = pr[(self.chain_len - chain_pos) * 5 :
                 (self.chain_len - chain_pos + 1) * 5]
         return (pr[1] << 24) | (pr[2] << 16) | (pr[3] << 8) | pr[4]
-    def get_mcu(self):
-        return self.spi.get_mcu()
 
 # Helper to setup an spi daisy chain bus from settings in a config section
 def lookup_tmc_spi_chain(config):
@@ -269,20 +258,11 @@ class MCU_TMC_SPI:
         self.tmc_frequency = tmc_frequency
     def get_fields(self):
         return self.fields
-    def get_register_raw(self, reg_name):
+    def get_register(self, reg_name):
         reg = self.name_to_reg[reg_name]
         with self.mutex:
-            resp = self.tmc_spi.reg_read(reg, self.chain_pos)
-        return resp
-    def decode_spi_status(spi_status):
-        return {
-            "standstill": spi_status >> 3 & 0x1,
-            "sg2": spi_status >> 2 & 0x1,
-            "driver_error": spi_status >> 1 & 0x1,
-            "reset_flag": spi_status & 0x1
-        }
-    def get_register(self, reg_name):
-        return self.get_register_raw(reg_name)["data"]
+            read = self.tmc_spi.reg_read(reg, self.chain_pos)
+        return read
     def set_register(self, reg_name, val, print_time=None):
         reg = self.name_to_reg[reg_name]
         with self.mutex:
@@ -294,8 +274,6 @@ class MCU_TMC_SPI:
             "Unable to write tmc spi '%s' register %s" % (self.name, reg_name))
     def get_tmc_frequency(self):
         return self.tmc_frequency
-    def get_mcu(self):
-        return self.tmc_spi.get_mcu()
 
 
 ######################################################################
@@ -316,6 +294,7 @@ class TMC2130:
         cmdhelper.setup_register_dump(ReadRegisters)
         self.get_phase_offset = cmdhelper.get_phase_offset
         self.get_status = cmdhelper.get_status
+        self.query_phase = cmdhelper._query_phase
         # Setup basic register values
         tmc.TMCWaveTableHelper(config, self.mcu_tmc)
         tmc.TMCStealthchopHelper(config, self.mcu_tmc)
@@ -345,7 +324,6 @@ class TMC2130:
         set_config_field(config, "pwm_grad", 4)
         set_config_field(config, "pwm_freq", 1)
         set_config_field(config, "pwm_autoscale", True)
-        set_config_field(config, "freewheel", 0)
         # TPOWERDOWN
         set_config_field(config, "tpowerdown", 0)
 

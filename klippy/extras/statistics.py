@@ -52,21 +52,44 @@ class PrinterSysStats:
 class PrinterStats:
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.reactor = reactor = self.printer.get_reactor()
+        reactor = self.printer.get_reactor()
         self.stats_timer = reactor.register_timer(self.generate_stats)
         self.stats_cb = []
         self.printer.register_event_handler("klippy:ready", self.handle_ready)
+        self.printer.register_event_handler("klippy:shutdown", self.handle_shutdown)
+        self.shutdown_log_cnt = 50
+        self.printer_is_ready = False
+        self.stats_record_counter = 0
+        self.stats_record_threshold = 2
+        if config.has_section('printer'):
+            printer_config = config.getsection('printer')
+            self.stats_record_threshold = printer_config.getint(
+                'stats_record_threshold', self.stats_record_threshold, minval=0)
     def handle_ready(self):
+        self.shutdown_log_cnt = 50
+        self.printer_is_ready = True
         self.stats_cb = [o.stats for n, o in self.printer.lookup_objects()
                          if hasattr(o, 'stats')]
         if self.printer.get_start_args().get('debugoutput') is None:
-            self.reactor.update_timer(self.stats_timer, self.reactor.NOW)
+            reactor = self.printer.get_reactor()
+            reactor.update_timer(self.stats_timer, reactor.NOW)
+    def handle_shutdown(self):
+        self.printer_is_ready = False
     def generate_stats(self, eventtime):
-        with self.reactor.assert_no_pause():
-            stats = [cb(eventtime) for cb in self.stats_cb]
+        if not self.printer_is_ready:
+            if self.shutdown_log_cnt > 0:
+                logging.info("Printer is shutdown, final stats")
+                self.shutdown_log_cnt -= 1
+            else:
+                return eventtime + 1.
+        stats = [cb(eventtime) for cb in self.stats_cb]
         if max([s[0] for s in stats]):
-            stats_str = ' '.join([s[1] for s in stats if s[1]])
-            logging.info("Stats %.1f: %s", eventtime, stats_str)
+            if self.stats_record_threshold > 0:
+                self.stats_record_counter += 1
+                if self.stats_record_counter >= self.stats_record_threshold:
+                    logging.info("Stats %.1f: %s", eventtime,
+                                ' '.join([s[1] for s in stats]))
+                    self.stats_record_counter = 0
         return eventtime + 1.
 
 def load_config(config):

@@ -19,40 +19,49 @@ echo -e "\n\n=============== Install system dependencies\n\n"
 PKGS="virtualenv python2-dev libffi-dev build-essential"
 PKGS="${PKGS} gcc-avr avr-libc"
 PKGS="${PKGS} libnewlib-arm-none-eabi gcc-arm-none-eabi binutils-arm-none-eabi"
-sudo apt-get update
+PKGS="${PKGS} pv libmpfr-dev libgmp-dev libmpc-dev texinfo bison flex"
 sudo apt-get install ${PKGS}
 
 
 ######################################################################
-# Install pru gcc
+# Install (or build) pru gcc
 ######################################################################
 
 echo -e "\n\n=============== Install embedded pru gcc\n\n"
-PRU_ARCHIVE="pru-elf-2024.05.amd64.tar.xz"
-PRU_URL="https://github.com/dinuxbg/gnupru/releases/download/2024.05/${PRU_ARCHIVE}"
+PRU_FILE=${CACHE_DIR}/gnupru.tar.gz
+PRU_DIR=${BUILD_DIR}/pru-gcc
 
-if [ ! -f ${CACHE_DIR}/${PRU_ARCHIVE} ]; then
-    wget "${PRU_URL}" -O "${CACHE_DIR}/${PRU_ARCHIVE}"
+if [ ! -f ${PRU_FILE} ]; then
+    cd ${BUILD_DIR}
+    git config --global user.email "you@example.com"
+    git config --global user.name "Your Name"
+    git clone https://github.com/dinuxbg/gnupru -b 2024.05 --depth 1
+    cd gnupru
+    export PREFIX=${PRU_DIR}
+    ./download-and-prepare.sh 2>&1 | pv -nli 30 > ${BUILD_DIR}/gnupru-build.log
+    ./build.sh 2>&1 | pv -nli 30 >> ${BUILD_DIR}/gnupru-build.log
+    cd ${BUILD_DIR}
+    tar cfz ${PRU_FILE} pru-gcc/
+else
+    cd ${BUILD_DIR}
+    tar xfz ${PRU_FILE}
 fi
-cd ${BUILD_DIR}
-tar xJf ${CACHE_DIR}/${PRU_ARCHIVE}
-
 
 ######################################################################
-# Install or1k toolchain
+# Install or1k-linux-musl toolchain
 ######################################################################
 
-echo -e "\n\n=============== Install or1k toolchain\n\n"
-OR1K_ARCHIVE="or1k-elf-12.0.1-20220210-20220304.tar.xz"
-OR1K_REL="or1k-12.0.1-20220210-20220304"
-OR1K_URL="https://github.com/openrisc/or1k-gcc/releases/download/${OR1K_REL}/${OR1K_ARCHIVE}"
-if [ ! -f ${CACHE_DIR}/${OR1K_ARCHIVE} ]; then
-    wget "${OR1K_URL}" -O "${CACHE_DIR}/${OR1K_ARCHIVE}"
+echo -e "\n\n=============== Install or1k-linux-musl toolchain\n\n"
+TOOLCHAIN=or1k-linux-musl-cross
+TOOLCHAIN_ZIP=${TOOLCHAIN}.tgz
+GCC_VERSION=10
+TOOLCHAIN_ZIP_V=${TOOLCHAIN}-${GCC_VERSION}.tgz
+URL=https://more.musl.cc/${GCC_VERSION}/x86_64-linux-musl/
+if [ ! -f ${CACHE_DIR}/${TOOLCHAIN_ZIP_V} ]; then
+    curl ${URL}/${TOOLCHAIN_ZIP} -o ${CACHE_DIR}/${TOOLCHAIN_ZIP_V}
 fi
 cd ${BUILD_DIR}
-tar xJf ${CACHE_DIR}/${OR1K_ARCHIVE}
-
-
+tar xf ${CACHE_DIR}/${TOOLCHAIN_ZIP_V}
 ######################################################################
 # Create python3 virtualenv environment
 ######################################################################

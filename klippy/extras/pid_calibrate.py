@@ -17,11 +17,17 @@ class PIDCalibrate:
         heater_name = gcmd.get('HEATER')
         target = gcmd.get_float('TARGET')
         write_file = gcmd.get_int('WRITE_FILE', 0)
+        profile = gcmd.get('PROFILE', 'default')
         pheaters = self.printer.lookup_object('heaters')
         try:
             heater = pheaters.lookup_heater(heater_name)
         except self.printer.config_error as e:
             raise gcmd.error(str(e))
+
+        # Check if PID calibration is allowed for this heater
+        if hasattr(heater, 'allow_pid_calibrate') and not heater.allow_pid_calibrate:
+            raise gcmd.error("PID calibration is not allowed for heater '%s'" % (heater_name,))
+
         self.printer.lookup_object('toolhead').get_last_move_time()
         calibrate = ControlAutoTune(heater, target)
         old_control = heater.set_control(calibrate)
@@ -49,6 +55,36 @@ class PIDCalibrate:
         configfile.set(cfgname, 'pid_Kp', "%.3f" % (Kp,))
         configfile.set(cfgname, 'pid_Ki', "%.3f" % (Ki,))
         configfile.set(cfgname, 'pid_Kd', "%.3f" % (Kd,))
+
+        # Check if heater has ignore_pid_json setting and save to JSON if needed
+        ignore_pid_json = getattr(heater.control, 'ignore_pid_json', True)
+        if not ignore_pid_json:
+            try:
+                profiles = heater.control._load_heater_pid_profiles_from_json(heater.control.json_filename)
+                if profiles is None:
+                    profiles = {}
+
+                # Update or create specified profile
+                if profile not in profiles:
+                    profiles[profile] = {}
+
+                profiles[profile].update({
+                    'Kp': Kp,
+                    'Ki': Ki,
+                    'Kd': Kd
+                })
+                heater.control._save_heater_pid_profiles_to_json(heater.control.json_filename, profiles)
+
+                if (hasattr(heater.control, 'current_profile') and
+                    heater.control.current_profile == profile and
+                    hasattr(heater.control, 'pid_profiles')):
+                    heater.control.pid_profiles[profile]['Kp'] = Kp / heaters.PID_PARAM_BASE
+                    heater.control.pid_profiles[profile]['Ki'] = Ki / heaters.PID_PARAM_BASE
+                    heater.control.pid_profiles[profile]['Kd'] = Kd / heaters.PID_PARAM_BASE
+                    heater.control.set_pid_profile(profile)
+
+            except Exception as e:
+                logging.warning("Failed to save PID parameters to JSON: %s", str(e))
 
 TUNE_PID_DELTA = 5.0
 

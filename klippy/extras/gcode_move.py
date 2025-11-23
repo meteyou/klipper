@@ -1,13 +1,25 @@
 # G-Code G1 movement commands (and associated coordinate manipulation)
 #
-# Copyright (C) 2016-2025  Kevin O'Connor <kevin@koconnor.net>
+# Copyright (C) 2016-2021  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging
+import logging, copy
 
 class GCodeMove:
     def __init__(self, config):
         self.printer = printer = config.get_printer()
+        printer.register_event_handler("klippy:ready", self._handle_ready)
+        printer.register_event_handler("klippy:shutdown", self._handle_shutdown)
+        printer.register_event_handler("toolhead:set_position",
+                                       self.reset_last_position)
+        printer.register_event_handler("toolhead:manual_move",
+                                       self.reset_last_position)
+        printer.register_event_handler("gcode:command_error",
+                                       self.reset_last_position)
+        printer.register_event_handler("extruder:activate_extruder",
+                                       self._handle_activate_extruder)
+        printer.register_event_handler("homing:home_rails_end",
+                                       self._handle_home_rails_end)
         self.is_printer_ready = False
         # Register g-code commands
         gcode = printer.lookup_object('gcode')
@@ -30,31 +42,15 @@ class GCodeMove:
         self.base_position = [0.0, 0.0, 0.0, 0.0]
         self.last_position = [0.0, 0.0, 0.0, 0.0]
         self.homing_position = [0.0, 0.0, 0.0, 0.0]
-        self.axis_map = {'X':0, 'Y': 1, 'Z': 2, 'E': 3}
         self.speed = 25.
-        self.speed_factor = 1. / 60.
+        self.speed_factor = self.speed_factor_bak = 1. / 60.
         self.extrude_factor = 1.
         # G-Code state
         self.saved_states = {}
         self.move_transform = self.move_with_transform = None
         self.position_with_transform = (lambda: [0., 0., 0., 0.])
-        # Register callbacks
-        printer.register_event_handler("klippy:ready", self._handle_ready)
-        printer.register_event_handler("klippy:shutdown", self._handle_shutdown)
-        printer.register_event_handler("klippy:analyze_shutdown",
-                                       self._handle_analyze_shutdown)
-        printer.register_event_handler("toolhead:set_position",
-                                       self.reset_last_position)
-        printer.register_event_handler("toolhead:manual_move",
-                                       self.reset_last_position)
-        printer.register_event_handler("toolhead:update_extra_axes",
-                                       self._update_extra_axes)
-        printer.register_event_handler("gcode:command_error",
-                                       self.reset_last_position)
-        printer.register_event_handler("extruder:activate_extruder",
-                                       self._handle_activate_extruder)
-        printer.register_event_handler("homing:home_rails_end",
-                                       self._handle_home_rails_end)
+        wh = self.printer.lookup_object('webhooks')
+        wh.register_endpoint("control/print_speed", self.handle_control_print_speed)
     def _handle_ready(self):
         self.is_printer_ready = True
         if self.move_transform is None:
@@ -63,8 +59,9 @@ class GCodeMove:
             self.position_with_transform = toolhead.get_position
         self.reset_last_position()
     def _handle_shutdown(self):
+        if not self.is_printer_ready:
+            return
         self.is_printer_ready = False
-    def _handle_analyze_shutdown(self, msg, details):
         logging.info("gcode state: absolute_coord=%s absolute_extrude=%s"
                      " base_position=%s last_position=%s homing_position=%s"
                      " speed_factor=%s extrude_factor=%s speed=%s",
@@ -94,7 +91,7 @@ class GCodeMove:
     def _get_gcode_position(self):
         p = [lp - bp for lp, bp in zip(self.last_position, self.base_position)]
         p[3] /= self.extrude_factor
-        return p[:4]
+        return p
     def _get_gcode_speed(self):
         return self.speed / self.speed_factor
     def _get_gcode_speed_override(self):
@@ -107,62 +104,65 @@ class GCodeMove:
             'extrude_factor': self.extrude_factor,
             'absolute_coordinates': self.absolute_coord,
             'absolute_extrude': self.absolute_extrude,
-            'homing_origin': self.Coord(self.homing_position),
-            'position': self.Coord(self.last_position),
-            'gcode_position': self.Coord(move_position),
-            'axis_map': self.axis_map,
+            'homing_origin': self.Coord(*self.homing_position),
+            'position': self.Coord(*self.last_position),
+            'gcode_position': self.Coord(*move_position),
         }
     def reset_last_position(self):
         if self.is_printer_ready:
             self.last_position = self.position_with_transform()
-    def _update_extra_axes(self):
-        toolhead = self.printer.lookup_object('toolhead')
-        axis_map = {'X':0, 'Y': 1, 'Z': 2, 'E': 3}
-        extra_axes = toolhead.get_extra_axes()
-        for index, ea in enumerate(extra_axes):
-            if ea is None:
-                continue
-            gcode_id = ea.get_axis_gcode_id()
-            if (gcode_id is None or len(gcode_id) != 1 or not gcode_id.isupper()
-                or gcode_id in axis_map or gcode_id in "FN"):
-                continue
-            axis_map[gcode_id] = index
-        self.axis_map = axis_map
-        self.base_position[4:] = [0.] * (len(extra_axes) - 4)
-        self.reset_last_position()
     # G-Code movement commands
     def cmd_G1(self, gcmd):
         # Move
+        delta_e = 0
         params = gcmd.get_command_parameters()
         try:
-            for axis, pos in self.axis_map.items():
+            for pos, axis in enumerate('XYZ'):
                 if axis in params:
                     v = float(params[axis])
-                    absolute_coord = self.absolute_coord
-                    if axis == 'E':
-                        v *= self.extrude_factor
-                        if not self.absolute_extrude:
-                            absolute_coord = False
-                    if not absolute_coord:
+                    if not self.absolute_coord:
                         # value relative to position of last move
                         self.last_position[pos] += v
                     else:
                         # value relative to base coordinate position
                         self.last_position[pos] = v + self.base_position[pos]
+            if 'E' in params:
+                v = float(params['E']) * self.extrude_factor
+                if not self.absolute_coord or not self.absolute_extrude:
+                    # value relative to position of last move
+                    delta_e = v
+                    self.last_position[3] += v
+                else:
+                    # value relative to base coordinate position
+                    delta_e = v - self.last_position[3]
+                    self.last_position[3] = v + self.base_position[3]
             if 'F' in params:
                 gcode_speed = float(params['F'])
                 if gcode_speed <= 0.:
-                    raise gcmd.error("Invalid speed in '%s'"
-                                     % (gcmd.get_commandline(),))
+                    error = '{"coded": "0003-0529-0000-0013", "msg":"%s"}' % ("Invalid speed in '{}'".format(gcmd.get_commandline()))
+                    raise gcmd.error(error)
+                    # raise gcmd.error("Invalid speed in '%s'"
+                    #                  % (gcmd.get_commandline(),))
                 self.speed = gcode_speed * self.speed_factor
         except ValueError as e:
-            raise gcmd.error("Unable to parse move '%s'"
-                             % (gcmd.get_commandline(),))
+            error = '{"coded": "0003-0529-0000-0014", "msg":"%s"}' % ("Unable to parse move '%s'" % (gcmd.get_commandline(),))
+            raise gcmd.error(error)
+            # raise gcmd.error("Unable to parse move '%s'"
+            #                  % (gcmd.get_commandline(),))
+        toolhead = self.printer.lookup_object('toolhead')
+        extruder = toolhead.get_extruder()
+        print_stats = self.printer.lookup_object('print_stats', None)
+        if print_stats is not None and print_stats.state == 'printing':
+            extruder.printing_e_pos += delta_e
+            if extruder.printing_e_pos > 0:
+                extruder.printing_e_pos = 0
         self.move_with_transform(self.last_position, self.speed)
     # G-Code coordinate manipulation
     def cmd_G20(self, gcmd):
         # Set units to inches
-        raise gcmd.error('Machine does not support G20 (inches) command')
+        error = '{"coded": "0003-0529-0000-0015", "msg":"%s"}' % ("Machine does not support G20 (inches) command")
+        raise gcmd.error(error)
+        # raise gcmd.error('Machine does not support G20 (inches) command')
     def cmd_G21(self, gcmd):
         # Set units to millimeters
         pass
@@ -187,16 +187,58 @@ class GCodeMove:
                     offset *= self.extrude_factor
                 self.base_position[i] = self.last_position[i] - offset
         if offsets == [None, None, None, None]:
-            self.base_position[:4] = self.last_position[:4]
+            self.base_position = list(self.last_position)
+        toolhead = self.printer.lookup_object('toolhead')
+        toolhead.get_extruder().printing_e_pos = 0
     def cmd_M114(self, gcmd):
         # Get Current Position
         p = self._get_gcode_position()
         gcmd.respond_raw("X:%.3f Y:%.3f Z:%.3f E:%.3f" % tuple(p))
+    def handle_control_print_speed(self, web_request):
+        try:
+            old_speed_factor = self.speed_factor
+            old_speed_factor_bak = self.speed_factor_bak
+            value = web_request.get_float('S', 100) / (60. * 100.)
+            self.speed = self._get_gcode_speed() * value
+            self.speed_factor = self.speed_factor_bak = value
+            web_request.send({'state': 'success'})
+            virtual_sdcard = self.printer.lookup_object('virtual_sdcard', None)
+            if virtual_sdcard is not None and (self.speed_factor != old_speed_factor or
+                                              self.speed_factor_bak != old_speed_factor_bak):
+                virtual_sdcard.record_pl_print_flow_and_speed_factor({
+                    'speed_factor': self.speed_factor,
+                    'speed_factor_bak': self.speed_factor_bak
+                })
+        except Exception as e:
+            logging.error(f'failed to set print speed: {str(e)}')
+            web_request.send({'state': 'error', 'message': str(e)})
     def cmd_M220(self, gcmd):
         # Set speed factor override percentage
-        value = gcmd.get_float('S', 100., above=0.) / (60. * 100.)
-        self.speed = self._get_gcode_speed() * value
-        self.speed_factor = value
+        params = gcmd.get_command_parameters()
+        old_speed_factor = self.speed_factor
+        old_speed_factor_bak = self.speed_factor_bak
+
+        if 'R' in params:
+            value = self.speed_factor_bak
+            self.speed = self._get_gcode_speed() * value
+            self.speed_factor = self.speed_factor_bak
+
+        if 'B' in params:
+            self.speed_factor_bak = old_speed_factor
+
+        if 'S' in params:
+            value = gcmd.get_float('S', 100., above=0.) / (60. * 100.)
+            self.speed = self._get_gcode_speed() * value
+            self.speed_factor = value
+
+        virtual_sdcard = self.printer.lookup_object('virtual_sdcard', None)
+        if virtual_sdcard is not None and ('S' in params or 'R' in params or 'B' in params):
+            if (self.speed_factor != old_speed_factor or
+                self.speed_factor_bak != old_speed_factor_bak):
+                virtual_sdcard.record_pl_print_flow_and_speed_factor({
+                    'speed_factor': self.speed_factor,
+                    'speed_factor_bak': self.speed_factor_bak
+                })
     def cmd_M221(self, gcmd):
         # Set extrude factor override percentage
         new_extrude_factor = gcmd.get_float('S', 100., above=0.) / 100.
@@ -204,6 +246,9 @@ class GCodeMove:
         e_value = (last_e_pos - self.base_position[3]) / self.extrude_factor
         self.base_position[3] = last_e_pos - e_value * new_extrude_factor
         self.extrude_factor = new_extrude_factor
+        virtual_sdcard = self.printer.lookup_object('virtual_sdcard', None)
+        if virtual_sdcard is not None:
+            virtual_sdcard.record_pl_print_flow_and_speed_factor({'flow_factor': self.extrude_factor})
     cmd_SET_GCODE_OFFSET_help = "Set a virtual offset to g-code positions"
     def cmd_SET_GCODE_OFFSET(self, gcmd):
         move_delta = [0., 0., 0., 0.]
@@ -226,7 +271,12 @@ class GCodeMove:
             self.move_with_transform(self.last_position, speed)
     cmd_SAVE_GCODE_STATE_help = "Save G-Code coordinate state"
     def cmd_SAVE_GCODE_STATE(self, gcmd):
+        toolhead = self.printer.lookup_object('toolhead')
         state_name = gcmd.get('NAME', 'default')
+        gcode_id = None
+        extruder = toolhead.get_extruder()
+        if hasattr(extruder, 'gcode_id'):
+            gcode_id = extruder.gcode_id
         self.saved_states[state_name] = {
             'absolute_coord': self.absolute_coord,
             'absolute_extrude': self.absolute_extrude,
@@ -235,7 +285,13 @@ class GCodeMove:
             'homing_position': list(self.homing_position),
             'speed': self.speed, 'speed_factor': self.speed_factor,
             'extrude_factor': self.extrude_factor,
+            'accel': toolhead.max_accel,
+            'gcode_id': gcode_id
         }
+        fan_set = self.printer.lookup_object('fan', None)
+        if fan_set is not None:
+            self.saved_states[state_name]['fan_speed_dict'] = fan_set.get_all_fan_speed()
+
     cmd_RESTORE_GCODE_STATE_help = "Restore a previously saved G-Code state"
     def cmd_RESTORE_GCODE_STATE(self, gcmd):
         state_name = gcmd.get('NAME', 'default')
@@ -243,21 +299,40 @@ class GCodeMove:
         if state is None:
             raise gcmd.error("Unknown g-code state: %s" % (state_name,))
         # Restore state
+        fan_set = self.printer.lookup_object('fan', None)
+        if fan_set is not None:
+            try:
+                fan_set.resume_all_fan_speed(copy.deepcopy(state['fan_speed_dict']))
+            except Exception as e:
+                logging.error(f'failed to restore fan speed: {str(e)}')
         self.absolute_coord = state['absolute_coord']
         self.absolute_extrude = state['absolute_extrude']
-        self.base_position[:4] = state['base_position'][:4]
-        self.homing_position = list(state['homing_position'])
+        # self.base_position = list(state['base_position'])
+        # self.homing_position = list(state['homing_position'])
         self.speed = state['speed']
         self.speed_factor = state['speed_factor']
         self.extrude_factor = state['extrude_factor']
+        toolhead = self.printer.lookup_object('toolhead')
         # Restore the relative E position
         e_diff = self.last_position[3] - state['last_position'][3]
         self.base_position[3] += e_diff
         # Move the toolhead back if requested
         if gcmd.get_int('MOVE', 0):
             speed = gcmd.get_float('MOVE_SPEED', self.speed, above=0.)
-            self.last_position[:3] = state['last_position'][:3]
+            accel = gcmd.get_float('MOVE_ACCEL', state['accel'], above=0.)
+            extrude = gcmd.get_float('EXTRUDE', 0., minval=0., maxval=20.)
+            toolhead.max_accel = accel
+            toolhead._calc_junction_deviation()
+            self.last_position[0] = state['last_position'][0] - state['base_position'][0] + self.base_position[0]
+            self.last_position[1] = state['last_position'][1] - state['base_position'][1] + self.base_position[1]
+            self.last_position[2] = state['last_position'][2] - state['base_position'][2] + self.base_position[2]
             self.move_with_transform(self.last_position, speed)
+            self.last_position[3] += extrude
+            self.move_with_transform(self.last_position, speed)
+            toolhead.max_accel = state['accel']
+            toolhead._calc_junction_deviation()
+        else:
+            toolhead.set_accel(state['accel'])
     cmd_GET_POSITION_help = (
         "Return information on the current location of the toolhead")
     def cmd_GET_POSITION(self, gcmd):
@@ -273,7 +348,7 @@ class GCodeMove:
         kinfo = zip("XYZ", kin.calc_position(dict(cinfo)))
         kin_pos = " ".join(["%s:%.6f" % (a, v) for a, v in kinfo])
         toolhead_pos = " ".join(["%s:%.6f" % (a, v) for a, v in zip(
-            "XYZE", toolhead.get_position()[:4])])
+            "XYZE", toolhead.get_position())])
         gcode_pos = " ".join(["%s:%.6f"  % (a, v)
                               for a, v in zip("XYZE", self.last_position)])
         base_pos = " ".join(["%s:%.6f"  % (a, v)

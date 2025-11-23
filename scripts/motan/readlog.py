@@ -3,6 +3,7 @@
 # Copyright (C) 2021  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+import random, time
 import json, zlib
 
 class error(Exception):
@@ -233,64 +234,6 @@ class HandleStepQ:
                 step_pos += qs_dist
                 step_data.append((step_time, step_halfpos, step_pos))
 LogHandlers["stepq"] = HandleStepQ
-
-# Extract tmc current and stallguard data from the log
-class HandleStallguard:
-    SubscriptionIdParts = 2
-    ParametersMin = 2
-    ParametersMax = 2
-    DataSets = [
-        ('stallguard(<stepper>,sg_result)',
-         'Stallguard result of the given stepper driver'),
-        ('stallguard(<stepper>,cs_actual)',
-         'Current level result of the given stepper driver'),
-    ]
-    def __init__(self, lmanager, name, name_parts):
-        self.name = name
-        self.stepper_name = name_parts[1]
-        self.filter = name_parts[2]
-        self.jdispatch = lmanager.get_jdispatch()
-        self.data = []
-        self.ret = None
-        self.driver_name = ""
-        for k in lmanager.get_initial_status()['configfile']['settings']:
-            if not k.startswith("tmc"):
-                continue
-            if k.endswith(self.stepper_name):
-                self.driver_name = k
-                break
-        # Current decode
-        self.status_tracker = lmanager.get_status_tracker()
-        self.next_status_time = 0.
-        self.irun = 0
-    def get_label(self):
-        label = '%s %s %s' % (self.driver_name, self.stepper_name,
-                              self.filter)
-        if self.filter == "sg_result":
-            return {'label': label, 'units': 'Stallguard'}
-        elif self.filter == "cs_actual":
-            return {'label': label, 'units': 'CS Actual'}
-    # Search datapoint in dataset extrapolate in between
-    def pull_data(self, req_time):
-        while 1:
-            if len(self.data) == 0:
-                jmsg = self.jdispatch.pull_msg(req_time, self.name)
-                if jmsg is None:
-                    return
-                self.data = jmsg["data"]
-            if self.ret is None and len(self.data) > 0:
-                time, sg_result, cs_actual = self.data.pop(0)
-                self.ret = {
-                    "time": time,
-                    "sg_result": sg_result,
-                    "cs_actual": cs_actual,
-                }
-            if self.ret:
-                time = self.ret["time"]
-                if req_time <= time:
-                    return self.ret[self.filter]
-                self.ret = None
-LogHandlers["stallguard"] = HandleStallguard
 
 # Extract stepper motor phase position
 class HandleStepPhase:
@@ -562,6 +505,69 @@ class HandleEddyCurrent:
             self.data_pos += 1
 LogHandlers["ldc1612"] = HandleEddyCurrent
 
+# Extract inductance coil data
+class HandleInductaCoil:
+    SubscriptionIdParts = 2
+    ParametersMin = 1
+    ParametersMax = 2
+    DataSets = [
+        ('inductance_coil(<name>)', 'Coil resonant frequency')
+    ]
+    def __init__(self, lmanager, name, name_parts):
+        self.name = name
+        self.sensor_name = name_parts[1]
+        if len(name_parts) == 3 and name_parts[2] not in ("period", "z"):
+            raise error("Unknown inductance_coil selection '%s'" % (name_parts[2],))
+        self.report_frequency = True
+        self.jdispatch = lmanager.get_jdispatch()
+        self.next_samp = self.prev_samp = [0., 0.]
+        self.cur_data = []
+        self.data_pos = 0
+        t = time.time() * 1000
+        self.csv = open("{}_freq.csv".format(lmanager.log_prefix), "w+")
+    def __del__(self):
+        try:
+            self.csv.close()
+        except:
+            pass
+
+    def get_label(self):
+        if self.report_frequency:
+            label = '%s frequency' % (self.sensor_name,)
+            return {'label': label, 'units': 'Frequency\n(Hz)'}
+        label = '%s period' % (self.sensor_name,)
+        return {'label': label, 'units': 'Period\n(s)'}
+    def pull_data(self, req_time):
+        while 1:
+            next_time, next_freq = self.next_samp
+            if req_time <= next_time:
+                prev_time, prev_freq = self.prev_samp
+                if self.report_frequency:
+                    next_val = next_freq
+                    prev_val = prev_freq
+                else:
+                    next_val = 1. / next_freq
+                    prev_val = 1. / prev_freq
+                return interpolate(next_val, prev_val, next_time, prev_time,
+                                   req_time)
+            if self.data_pos >= len(self.cur_data):
+                # Read next data block
+                jmsg = self.jdispatch.pull_msg(req_time, self.name)
+                if jmsg is None:
+                    return 0.
+                self.cur_data = jmsg['data']
+                self.data_pos = 0
+                continue
+            self.prev_samp = self.next_samp
+            self.next_samp = self.cur_data[self.data_pos]
+            data_time, data_freq = self.next_samp
+            if data_freq > 0:
+                self.csv.write("{},{}\n".format(data_time, data_freq))
+            else:
+                return 0
+            self.data_pos += 1
+
+LogHandlers["inductance_coil"] = HandleInductaCoil
 
 ######################################################################
 # Log reading
@@ -697,6 +703,7 @@ class LogManager:
         self.start_status = {}
         self.log_subscriptions = {}
         self.status_tracker = None
+        self.log_prefix = log_prefix
     def setup_index(self):
         fmsg = self.index_reader.pull_msg()
         self.initial_status = status = fmsg['status']

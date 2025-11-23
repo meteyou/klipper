@@ -151,9 +151,11 @@ class DataLogger:
             self.send_subscribe("stepq:" + stepper,
                                 "motion_report/dump_stepper", {"name": stepper})
         # Subscribe to additional sensor data
-        stypes = ["adxl345", "lis2dw", "mpu9250", "angle"]
-        stypes = {st:st for st in stypes}
+        # stypes = ["adxl345", "lis2dw", "mpu9250", "angle"]
+        # stypes = {st:st for st in stypes}
+        stypes = dict()
         stypes['probe_eddy_current'] = 'ldc1612'
+        stypes['inductance_coil'] = 'inductance_coil'
         config = status["configfile"]["settings"]
         for cfgname in config.keys():
             for capprefix, st in sorted(stypes.items()):
@@ -162,10 +164,6 @@ class DataLogger:
                     lname = "%s:%s" % (st, aname)
                     qcmd = "%s/dump_%s" % (st, st)
                     self.send_subscribe(lname, qcmd, {"sensor": aname})
-            if cfgname.startswith("tmc"):
-                driver = ' '.join(cfgname.split()[1:])
-                self.send_subscribe("stallguard:" + driver,
-                                    "tmc/stallguard_dump", {"name": driver})
     def handle_dump(self, msg, raw_msg):
         msg_id = msg["id"]
         if "result" not in msg:

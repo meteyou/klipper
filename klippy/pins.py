@@ -4,8 +4,9 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import re
+from coded_exception import CodedException
 
-class error(Exception):
+class error(CodedException):
     pass
 
 

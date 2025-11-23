@@ -4,6 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import json, zlib, logging
+from coded_exception import CodedException
 
 DefaultMessages = {
     "identify_response offset=%u data=%.*s": 0,
@@ -23,7 +24,7 @@ MESSAGE_SEQ_MASK = 0x0f
 MESSAGE_DEST = 0x10
 MESSAGE_SYNC = 0x7e
 
-class error(Exception):
+class error(CodedException):
     pass
 
 def crc16_ccitt(buf):
@@ -324,7 +325,7 @@ class MessageParser:
     def create_command(self, msg):
         parts = msg.strip().split()
         if not parts:
-            return []
+            return ""
         msgname = parts[0]
         mp = self.messages_by_name.get(msgname)
         if mp is None:

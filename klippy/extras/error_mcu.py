@@ -3,7 +3,7 @@
 # Copyright (C) 2024  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging
+import logging, json
 
 message_shutdown = """
 Once the underlying issue is corrected, use the
@@ -62,8 +62,8 @@ class PrinterMCUError:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.clarify_callbacks = {}
-        self.printer.register_event_handler("klippy:analyze_shutdown",
-                                            self._handle_analyze_shutdown)
+        self.printer.register_event_handler("klippy:notify_mcu_shutdown",
+                                            self._handle_notify_mcu_shutdown)
         self.printer.register_event_handler("klippy:notify_mcu_error",
                                             self._handle_notify_mcu_error)
     def add_clarify(self, msg, callback):
@@ -87,15 +87,52 @@ class PrinterMCUError:
         # Update error message
         newmsg = "%s%s%s%s%s" % (prefix, mcu_msg, clarify_msg,
                                  hint, message_shutdown)
+        if 'ADC out of range' in newmsg:
+            import re
+            heater_index = 0
+            found_heater = None
+            heater_type = "unknown"
+
+            extruder_match = re.search(r"'(extruder\d*)'", newmsg)
+            if extruder_match:
+                found_heater = extruder_match.group(1)
+                extruder_num = found_heater.replace('extruder', '')
+                if extruder_num == '':
+                    heater_index = 0
+                else:
+                    heater_index = int(extruder_num)
+                heater_type = "extruder"
+            elif "'heater_bed'" in newmsg:
+                heater_type = "heater_bed"
+            elif "'temperature_sensor cavity'" in newmsg:
+                heater_type = "temperature_sensor"
+
+            if heater_type == "heater_bed":
+                id, index, code = 526, 0, 0
+            elif heater_type == "temperature_sensor":
+                id, index, code = 527, 0, 0
+            elif heater_type == "unknown":
+                id, index, code = 522, 0, 14
+            else:
+                id, index, code = 523, heater_index, 2
+            coded, oneshot, is_persistent = f"0003-{id:04d}-{index:04d}-{code:04d}", 0, 0
+            err_msg = json.dumps({
+                "coded": coded,
+                "oneshot": oneshot,
+                "msg": clarify_msg
+            })
+            # err_msg = '{"coded":"%s", "oneshot": %d, "msg": "%s"}' % (coded, oneshot, "ADC out of range")
+            newmsg = "%s\n%s" % (err_msg, newmsg)
+            self.printer.raise_structured_code_exception(coded, clarify_msg, oneshot, is_persistent)
+            self.printer.set_extruder_power('off')
+        elif msg and msg.startswith('{"coded"'):
+            newmsg = "%s\n%s" % (msg, newmsg)
         self.printer.update_error_msg(msg, newmsg)
-    def _handle_analyze_shutdown(self, msg, details):
+    def _handle_notify_mcu_shutdown(self, msg, details):
         if msg == "MCU shutdown":
             self._check_mcu_shutdown(msg, details)
         else:
             self.printer.update_error_msg(msg, "%s%s" % (msg, message_shutdown))
-        # Report reactor info (no good place to do this, so done here)
-        logging.info("Reactor garbage collection: %s",
-                     self.printer.get_reactor().get_gc_stats())
     def _check_protocol_error(self, msg, details):
         host_version = self.printer.start_args['software_version']
         msg_update = []
@@ -122,14 +159,20 @@ class PrinterMCUError:
                   "MCU(s) which should be updated:"]
         newmsg += msg_update + ["Up-to-date MCU(s):"] + msg_updated
         newmsg += [message_protocol_error2, details['error']]
+        if msg and (msg.startswith('{"coded"') or msg.startswith("{'coded'")):
+            newmsg = [msg + "\n"] + newmsg
         self.printer.update_error_msg(msg, "\n".join(newmsg))
     def _check_mcu_connect_error(self, msg, details):
         newmsg = "%s%s" % (details['error'], message_mcu_connect_error)
+        if msg and (msg.startswith('{"coded"') or msg.startswith("{'coded'")):
+            newmsg = "%s\n%s" % (msg, newmsg)
         self.printer.update_error_msg(msg, newmsg)
     def _handle_notify_mcu_error(self, msg, details):
-        if msg == "Protocol error":
+        # if msg == "Protocol error":
+        if "Protocol error" in msg:
             self._check_protocol_error(msg, details)
-        elif msg == "MCU error during connect":
+        # elif msg == "MCU error during connect":
+        elif msg and "MCU error during connect" in msg:
             self._check_mcu_connect_error(msg, details)
 
 def load_config(config):

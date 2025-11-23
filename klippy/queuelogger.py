@@ -5,6 +5,19 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging, logging.handlers, threading, queue, time
 
+FILE_SIZE  = 10 * 1024 * 1024   # 10 MiB
+FILE_COUNT = 15                 # 15 files
+
+# Custom formatter to add timestamp with milliseconds
+class MillisecondFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        ct = self.converter(record.created)
+        if datefmt:
+            s = time.strftime(datefmt, ct)
+        else:
+            s = time.strftime("%H:%M:%S", ct)
+        return "%s.%03d" % (s, (record.msecs % 1000))
+
 # Class to forward all messages through a queue to a background thread
 class QueueHandler(logging.Handler):
     def __init__(self, queue):
@@ -21,10 +34,13 @@ class QueueHandler(logging.Handler):
             self.handleError(record)
 
 # Class to poll a queue in a background thread and log each message
-class QueueListener(logging.handlers.TimedRotatingFileHandler):
-    def __init__(self, filename):
-        logging.handlers.TimedRotatingFileHandler.__init__(
-            self, filename, when='midnight', backupCount=5)
+class QueueListener(logging.handlers.RotatingFileHandler):
+    def __init__(self, filename, maxBytes=FILE_SIZE, backupCount=FILE_COUNT):
+        logging.handlers.RotatingFileHandler.__init__(
+            self, filename, maxBytes=maxBytes, backupCount=backupCount)
+        # Add formatter with milliseconds
+        formatter = MillisecondFormatter("%(asctime)s:%(message)s")
+        self.setFormatter(formatter)
         self.bg_queue = queue.Queue()
         self.bg_thread = threading.Thread(target=self._bg_thread)
         self.bg_thread.start()
@@ -46,7 +62,7 @@ class QueueListener(logging.handlers.TimedRotatingFileHandler):
     def clear_rollover_info(self):
         self.rollover_info.clear()
     def doRollover(self):
-        logging.handlers.TimedRotatingFileHandler.doRollover(self)
+        logging.handlers.RotatingFileHandler.doRollover(self)
         lines = [self.rollover_info[name]
                  for name in sorted(self.rollover_info)]
         lines.append(
@@ -57,9 +73,9 @@ class QueueListener(logging.handlers.TimedRotatingFileHandler):
 
 MainQueueHandler = None
 
-def setup_bg_logging(filename, debuglevel):
+def setup_bg_logging(filename, debuglevel, maxBytes=FILE_SIZE):
     global MainQueueHandler
-    ql = QueueListener(filename)
+    ql = QueueListener(filename, maxBytes=maxBytes)
     MainQueueHandler = QueueHandler(ql.bg_queue)
     root = logging.getLogger()
     root.addHandler(MainQueueHandler)

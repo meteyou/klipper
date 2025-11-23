@@ -21,13 +21,17 @@ class PrinterADCtoTemperature:
         self.adc_convert = adc_convert
         ppins = config.get_printer().lookup_object('pins')
         self.mcu_adc = ppins.setup_pin('adc', config.get('sensor_pin'))
-        self.mcu_adc.setup_adc_callback(REPORT_TIME, self.adc_callback)
+        self.report_time_delta = config.getfloat('report_time_delta', REPORT_TIME, above=0.)
+        self.mcu_adc.setup_adc_callback(self.report_time_delta, self.adc_callback)
         self.diag_helper = HelperTemperatureDiagnostics(
             config, self.mcu_adc, adc_convert.calc_temp)
     def setup_callback(self, temperature_callback):
         self.temperature_callback = temperature_callback
     def get_report_time_delta(self):
-        return REPORT_TIME
+        return self.report_time_delta
+        # return REPORT_TIME
+    def set_read_tolerance(self, read_time_tol, min_update_ratio):
+        self.mcu_adc.set_read_tolerance(read_time_tol, min_update_ratio)
     def adc_callback(self, read_time, read_value):
         temp = self.adc_convert.calc_temp(read_value)
         self.temperature_callback(read_time + SAMPLE_COUNT * SAMPLE_TIME, temp)

@@ -77,3 +77,7 @@ class FrequencyCounter:
 
     def get_frequency(self):
         return self._freq
+
+    def get_count(self):
+        return self._last_count
+
