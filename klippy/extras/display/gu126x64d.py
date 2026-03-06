@@ -117,13 +117,12 @@ class GU126X64D:
             # Transmit changes
             for col_pos, count in diffs:
                 y = page * 8
-                # Set cursor position, then start Graphic Write
+                # Cursor Position (0x10) + Graphic Write (0x18) + data
+                # must be sent as one contiguous byte stream
+                packet = [0x10, col_pos, y, 0x18, count]
+                packet.extend(new_data[col_pos:col_pos + count])
                 self.send_cmds_cmd.send(
-                    [self.oid, [0x10, col_pos, y, 0x18, count]],
-                    reqclock=BACKGROUND_PRIORITY_CLOCK)
-                # Pixel data
-                self.send_data_cmd.send(
-                    [self.oid, new_data[col_pos:col_pos + count]],
+                    [self.oid, packet],
                     reqclock=BACKGROUND_PRIORITY_CLOCK)
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
