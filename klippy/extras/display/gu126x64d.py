@@ -117,13 +117,14 @@ class GU126X64D:
             # Transmit changes
             for col_pos, count in diffs:
                 y = page * 8
-                # Cursor Position (0x10) + Graphic Write (0x18) + data
-                # must be sent as one contiguous byte stream
-                packet = [0x10, col_pos, y, 0x18, count]
-                packet.extend(new_data[col_pos:col_pos + count])
-                self.send_cmds_cmd.send(
-                    [self.oid, packet],
-                    reqclock=BACKGROUND_PRIORITY_CLOCK)
+                # Diagnostic mode: send one graphic byte at a time to verify
+                # Graphic Write length semantics on the GU126x64D.
+                for i in range(count):
+                    packet = [0x10, col_pos + i, y, 0x18, 1,
+                              new_data[col_pos + i]]
+                    self.send_cmds_cmd.send(
+                        [self.oid, packet],
+                        reqclock=BACKGROUND_PRIORITY_CLOCK)
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
@@ -136,8 +137,7 @@ class GU126X64D:
             bot |= spaced >> (7 - row)
         bits_top = [(top >> s) & 0xff for s in range(0, 64, 8)]
         bits_bot = [(bot >> s) & 0xff for s in range(0, 64, 8)]
-        # GU126x64D may map the lower 8 rows before the upper 8 rows
-        return (bytearray(bits_bot), bytearray(bits_top))
+        return (bytearray(bits_top), bytearray(bits_bot))
     def set_glyphs(self, glyphs):
         for glyph_name, glyph_data in glyphs.items():
             icon = glyph_data.get('icon16x16')
