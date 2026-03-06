@@ -92,8 +92,8 @@ class GU126X64D:
         # Brightness: 0x1B, 0xF8 + brightness (1-8 → 0xF9-0xFF)
         self.send_cmds_cmd.send([self.oid, [0x1B, 0xF8 + self.brightness]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Clear display area: 0x12, x_left, y_top, x_right, y_bottom
-        self.send_cmds_cmd.send([self.oid, [0x12, 0, 0, 125, 63]],
+        # Clear display area: coordinates may be 1-based on this module
+        self.send_cmds_cmd.send([self.oid, [0x12, 1, 1, 126, 64]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
         self.flush()
     def flush(self):
@@ -116,11 +116,10 @@ class GU126X64D:
                     del diffs[i + 1]
             # Transmit changes
             for col_pos, count in diffs:
-                y = page * 8
-                # Diagnostic mode: send one graphic byte at a time to verify
-                # Graphic Write length semantics on the GU126x64D.
+                # Diagnostic mode: test 1-based coordinates and len semantics.
+                y = page * 8 + 1
                 for i in range(count):
-                    packet = [0x10, col_pos + i, y, 0x18, 1,
+                    packet = [0x10, col_pos + i + 1, y, 0x18, 0,
                               new_data[col_pos + i]]
                     self.send_cmds_cmd.send(
                         [self.oid, packet],
