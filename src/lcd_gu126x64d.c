@@ -1,0 +1,146 @@
+// Commands for sending messages to a GU126x64D VFD display
+//
+// Copyright (C) 2025
+//
+// This file may be distributed under the terms of the GNU GPLv3 license.
+
+#include "autoconf.h" // CONFIG_MACH_AVR
+#include "basecmd.h" // oid_alloc
+#include "board/gpio.h" // gpio_out_write
+#include "board/irq.h" // irq_poll
+#include "board/misc.h" // timer_from_us
+#include "command.h" // DECL_COMMAND
+#include "sched.h" // DECL_SHUTDOWN
+
+struct gu126x64d {
+    struct gpio_out sck, sin, ss, hb;
+    struct gpio_in mb;
+    uint32_t delay_ticks;
+};
+
+
+/****************************************************************
+ * Transmit functions
+ ****************************************************************/
+
+static __always_inline uint32_t
+nsecs_to_ticks(uint32_t ns)
+{
+    return timer_from_us(ns * 1000) / 1000000;
+}
+
+static void
+ndelay(uint32_t ticks)
+{
+    if (CONFIG_MACH_AVR)
+        // Slower MCUs don't require a delay
+        return;
+    uint32_t end = timer_read_time() + ticks;
+    while (timer_is_before(timer_read_time(), end))
+        irq_poll();
+}
+
+// Wait for Module Busy (MB) pin to go LOW, with fallback timeout
+static void
+gu126x64d_wait_ready(struct gu126x64d *g)
+{
+    uint32_t end = timer_read_time() + g->delay_ticks;
+    while (gpio_in_read(g->mb)) {
+        if (!timer_is_before(timer_read_time(), end))
+            break; // Timeout — send anyway for robustness
+        irq_poll();
+    }
+}
+
+// Transmit one byte with per-byte /SS framing (SPI Mode 0, MSB first)
+static void
+gu126x64d_xmit_byte(struct gu126x64d *g, uint8_t data)
+{
+    struct gpio_out sck = g->sck, sin = g->sin, ss = g->ss;
+    uint32_t delay = nsecs_to_ticks(125);
+
+    // Wait for module ready
+    gu126x64d_wait_ready(g);
+
+    // Assert /SS (active low)
+    gpio_out_write(ss, 0);
+    ndelay(delay);
+
+    // Clock out 8 bits, MSB first
+    uint8_t i;
+    for (i = 0; i < 8; i++) {
+        gpio_out_write(sin, (data >> 7) & 1);
+        data <<= 1;
+        ndelay(delay);
+        gpio_out_write(sck, 1); // Rising edge — data latched by display
+        ndelay(delay);
+        gpio_out_write(sck, 0); // Falling edge
+    }
+
+    // Deassert /SS
+    gpio_out_write(ss, 1);
+}
+
+// Transmit a series of bytes
+static void
+gu126x64d_xmit(struct gu126x64d *g, uint8_t len, uint8_t *data)
+{
+    while (len--) {
+        gu126x64d_xmit_byte(g, *data++);
+    }
+}
+
+
+/****************************************************************
+ * Interface
+ ****************************************************************/
+
+void
+command_config_gu126x64d(uint32_t *args)
+{
+    struct gu126x64d *g = oid_alloc(args[0], command_config_gu126x64d,
+                                    sizeof(*g));
+    g->sck = gpio_out_setup(args[1], 0);
+    g->ss = gpio_out_setup(args[2], 1);  // /SS idle high
+    g->sin = gpio_out_setup(args[3], 0);
+    g->mb = gpio_in_setup(args[4], 0);
+    g->hb = gpio_out_setup(args[5], 0);  // HB LOW = host ready
+    g->delay_ticks = args[6];
+}
+DECL_COMMAND(command_config_gu126x64d,
+             "config_gu126x64d oid=%c sck_pin=%u ss_pin=%u sin_pin=%u"
+             " mb_pin=%u hb_pin=%u delay_ticks=%u");
+
+void
+command_gu126x64d_send_cmds(uint32_t *args)
+{
+    struct gu126x64d *g = oid_lookup(args[0], command_config_gu126x64d);
+    uint8_t len = args[1], *cmds = command_decode_ptr(args[2]);
+    gu126x64d_xmit(g, len, cmds);
+}
+DECL_COMMAND(command_gu126x64d_send_cmds,
+             "gu126x64d_send_cmds oid=%c cmds=%*s");
+
+void
+command_gu126x64d_send_data(uint32_t *args)
+{
+    struct gu126x64d *g = oid_lookup(args[0], command_config_gu126x64d);
+    uint8_t len = args[1], *data = command_decode_ptr(args[2]);
+    gu126x64d_xmit(g, len, data);
+}
+DECL_COMMAND(command_gu126x64d_send_data,
+             "gu126x64d_send_data oid=%c data=%*s");
+
+void
+gu126x64d_shutdown(void)
+{
+    uint8_t i;
+    struct gu126x64d *g;
+    foreach_oid(i, g, command_config_gu126x64d) {
+        gpio_out_write(g->sck, 0);
+        gpio_out_write(g->sin, 0);
+        gpio_out_write(g->ss, 0);
+        gpio_out_write(g->hb, 0);
+    }
+}
+DECL_SHUTDOWN(gu126x64d_shutdown);
