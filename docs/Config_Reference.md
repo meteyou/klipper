@@ -4515,8 +4515,8 @@ Support for a display attached to the micro-controller.
 [display]
 lcd_type:
 #   The type of LCD chip in use. This may be "hd44780", "hd44780_spi",
-#   "aip31068_spi", "st7920", "emulated_st7920", "uc1701", "ssd1306", or
-#   "sh1106".
+#   "aip31068_spi", "gu126x64d", "st7920", "emulated_st7920", "uc1701",
+#   "ssd1306", or "sh1106".
 #   See the display sections below for information on each type and
 #   additional parameters they provide. This parameter must be
 #   provided.
@@ -4674,6 +4674,41 @@ spi_software_miso_pin:
 #   fixed to 4.
 ...
 ```
+
+#### gu126x64d display
+
+Information on configuring a GU126x64D-7000 Vacuum Fluorescent Display
+(VFD). This is a 126x64 pixel graphic display using a custom
+bit-banged SPI protocol with Module Busy / Host Busy handshaking.
+
+```
+[display]
+lcd_type: gu126x64d
+#   Set to "gu126x64d" for gu126x64d displays.
+sck_pin:
+ss_pin:
+sin_pin:
+#   The SPI pins connected to the display. sck_pin is the clock,
+#   ss_pin is the slave select (active low), and sin_pin is the
+#   serial data in. These parameters must be provided.
+mb_pin:
+#   The Module Busy input pin. The display drives this pin high while
+#   busy. This parameter must be provided.
+hb_pin:
+#   The Host Busy output pin. The MCU drives this pin to signal the
+#   display. This parameter must be provided.
+#rst_pin:
+#   The pin connected to the reset (/RES) pin on the display. If it
+#   is not specified then no hardware reset will be performed.
+#brightness:
+#   The display brightness level. The value may range from 1 to 8 and
+#   the default is 7.
+...
+```
+
+All pins must be on the same MCU. See the
+[SET_DISPLAY_BRIGHTNESS](#set_display_brightness) command for
+runtime brightness control.
 
 #### st7920 display
 
