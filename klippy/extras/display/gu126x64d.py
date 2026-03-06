@@ -116,12 +116,10 @@ class GU126X64D:
                     del diffs[i + 1]
             # Transmit changes
             for col_pos, count in diffs:
-                col_end = col_pos + count - 1
-                yt = page * 8
-                yb = yt + 7
-                # Graphic Area Write command header (0x1F)
+                y = page * 8
+                # Set cursor position, then start Graphic Write
                 self.send_cmds_cmd.send(
-                    [self.oid, [0x1F, col_pos, yt, col_end, yb]],
+                    [self.oid, [0x10, col_pos, y, 0x18, count]],
                     reqclock=BACKGROUND_PRIORITY_CLOCK)
                 # Pixel data
                 self.send_data_cmd.send(
@@ -130,14 +128,13 @@ class GU126X64D:
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
-        # Convert from "rows of pixels" to "columns of pixels"
-        # GU126x64D Write Mode 0x80: Bit7 = top pixel, Bit0 = bottom
+        # Convert from "rows of pixels" format to "columns of pixels"
         top = bot = 0
         for row in range(8):
             spaced = (data[row] * 0x8040201008040201) & 0x8080808080808080
-            top |= spaced >> row
+            top |= spaced >> (7 - row)
             spaced = (data[row + 8] * 0x8040201008040201) & 0x8080808080808080
-            bot |= spaced >> row
+            bot |= spaced >> (7 - row)
         bits_top = [(top >> s) & 0xff for s in range(0, 64, 8)]
         bits_bot = [(bot >> s) & 0xff for s in range(0, 64, 8)]
         return (bytearray(bits_top), bytearray(bits_bot))
