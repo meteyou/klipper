@@ -127,17 +127,17 @@ class GU126X64D:
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
-        # Convert from "rows of pixels" to "columns of pixels"
-        # GU126x64D appears to use Bit7=top, Bit0=bottom in vertical mode
+        # Convert from "rows of pixels" format to "columns of pixels"
         top = bot = 0
         for row in range(8):
             spaced = (data[row] * 0x8040201008040201) & 0x8080808080808080
-            top |= spaced >> row
+            top |= spaced >> (7 - row)
             spaced = (data[row + 8] * 0x8040201008040201) & 0x8080808080808080
-            bot |= spaced >> row
+            bot |= spaced >> (7 - row)
         bits_top = [(top >> s) & 0xff for s in range(0, 64, 8)]
         bits_bot = [(bot >> s) & 0xff for s in range(0, 64, 8)]
-        return (bytearray(bits_top), bytearray(bits_bot))
+        # GU126x64D may map the lower 8 rows before the upper 8 rows
+        return (bytearray(bits_bot), bytearray(bits_top))
     def set_glyphs(self, glyphs):
         for glyph_name, glyph_data in glyphs.items():
             icon = glyph_data.get('icon16x16')
