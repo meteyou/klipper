@@ -86,14 +86,14 @@ class GU126X64D:
         # Software Reset (0x19)
         self.send_cmds_cmd.send([self.oid, [0x19]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Write Mode: 0x1A, 0x80 (vertical orientation, horizontal cursor)
-        self.send_cmds_cmd.send([self.oid, [0x1A, 0x80]],
+        # Write Mode: 0x1A, 0x00 (diagnostic: horizontal orientation)
+        self.send_cmds_cmd.send([self.oid, [0x1A, 0x00]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
         # Brightness: 0x1B, 0xF8 + brightness (1-8 → 0xF9-0xFF)
         self.send_cmds_cmd.send([self.oid, [0x1B, 0xF8 + self.brightness]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Clear display area: coordinates may be 1-based on this module
-        self.send_cmds_cmd.send([self.oid, [0x12, 1, 1, 126, 64]],
+        # Clear display area
+        self.send_cmds_cmd.send([self.oid, [0x12, 0, 0, 125, 63]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
         self.flush()
     def flush(self):
@@ -116,14 +116,12 @@ class GU126X64D:
                     del diffs[i + 1]
             # Transmit changes
             for col_pos, count in diffs:
-                # Diagnostic mode: test 1-based coordinates and len semantics.
-                y = page * 8 + 1
-                for i in range(count):
-                    packet = [0x10, col_pos + i + 1, y, 0x18, 0,
-                              new_data[col_pos + i]]
-                    self.send_cmds_cmd.send(
-                        [self.oid, packet],
-                        reqclock=BACKGROUND_PRIORITY_CLOCK)
+                y = page * 8
+                packet = [0x10, col_pos, y, 0x18, count]
+                packet.extend(new_data[col_pos:col_pos + count])
+                self.send_cmds_cmd.send(
+                    [self.oid, packet],
+                    reqclock=BACKGROUND_PRIORITY_CLOCK)
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
