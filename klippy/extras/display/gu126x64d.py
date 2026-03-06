@@ -130,12 +130,14 @@ class GU126X64D:
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
+        # Convert from "rows of pixels" to "columns of pixels"
+        # GU126x64D Write Mode 0x80: Bit7 = top pixel, Bit0 = bottom
         top = bot = 0
         for row in range(8):
             spaced = (data[row] * 0x8040201008040201) & 0x8080808080808080
-            top |= spaced >> (7 - row)
+            top |= spaced >> row
             spaced = (data[row + 8] * 0x8040201008040201) & 0x8080808080808080
-            bot |= spaced >> (7 - row)
+            bot |= spaced >> row
         bits_top = [(top >> s) & 0xff for s in range(0, 64, 8)]
         bits_bot = [(bot >> s) & 0xff for s in range(0, 64, 8)]
         return (bytearray(bits_top), bytearray(bits_bot))
