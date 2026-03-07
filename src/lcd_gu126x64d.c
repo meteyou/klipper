@@ -40,17 +40,29 @@ ndelay(uint32_t ticks)
         irq_poll();
 }
 
-// Wait for Module Busy (MB) pin to go LOW, with fallback timeout.
-// Keep existing polarity assumptions from the working D-module setup.
+// Wait for MB to reach the requested level, with fallback timeout.
+// Current D-module assumption: MB=1 busy, MB=0 ready.
 static void
-gu126x64d_wait_ready(struct gu126x64d *g)
+gu126x64d_wait_mb(struct gu126x64d *g, uint8_t level)
 {
     uint32_t end = timer_read_time() + g->delay_ticks;
-    while (gpio_in_read(g->mb)) {
+    while (gpio_in_read(g->mb) != level) {
         if (!timer_is_before(timer_read_time(), end))
-            break; // Timeout — send anyway for robustness
+            break; // Timeout — continue for robustness while debugging
         irq_poll();
     }
+}
+
+static __always_inline void
+gu126x64d_wait_ready(struct gu126x64d *g)
+{
+    gu126x64d_wait_mb(g, 0);
+}
+
+static __always_inline void
+gu126x64d_wait_busy(struct gu126x64d *g)
+{
+    gu126x64d_wait_mb(g, 1);
 }
 
 static __always_inline void
@@ -86,6 +98,9 @@ gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
         ndelay(delay);
         gpio_out_write(sck, 0); // Falling edge
     }
+    // The reference implementation waits for the module to acknowledge each
+    // byte by asserting busy after the transfer.
+    gu126x64d_wait_busy(g);
 }
 
 // Transmit one full command packet while keeping /SS low across the entire
