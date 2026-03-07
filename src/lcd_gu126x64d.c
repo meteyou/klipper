@@ -53,18 +53,30 @@ gu126x64d_wait_ready(struct gu126x64d *g)
     }
 }
 
-// Transmit one raw byte with per-byte /SS framing (SPI mode 0, MSB first).
+static __always_inline void
+gu126x64d_ss_assert(struct gu126x64d *g, uint32_t delay)
+{
+    gpio_out_write(g->ss, 0);
+    ndelay(delay);
+}
+
+static __always_inline void
+gu126x64d_ss_deassert(struct gu126x64d *g, uint32_t delay)
+{
+    ndelay(delay);
+    gpio_out_write(g->ss, 1);
+}
+
+// Clock out one raw byte with /SS already asserted (SPI mode 0, MSB first).
 // Use a conservative clock to reduce parser/timing sensitivity while
 // debugging this display.
 static void
 gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
 {
-    struct gpio_out sck = g->sck, sin = g->sin, ss = g->ss;
+    struct gpio_out sck = g->sck, sin = g->sin;
     uint32_t delay = nsecs_to_ticks(1000);
 
     gu126x64d_wait_ready(g);
-    gpio_out_write(ss, 0);
-    ndelay(delay);
     uint8_t i;
     for (i = 0; i < 8; i++) {
         gpio_out_write(sin, (data >> 7) & 1);
@@ -74,19 +86,24 @@ gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
         ndelay(delay);
         gpio_out_write(sck, 0); // Falling edge
     }
-    gpio_out_write(ss, 1);
 }
 
-// Transmit a series of bytes, escaping literal 0x60 by sending it twice.
+// Transmit one full command packet while keeping /SS low across the entire
+// packet. Escape literal 0x60 by sending it twice inside the packet.
 static void
 gu126x64d_xmit(struct gu126x64d *g, uint8_t len, uint8_t *data)
 {
+    if (!len)
+        return;
+    uint32_t delay = nsecs_to_ticks(1000);
+    gu126x64d_ss_assert(g, delay);
     while (len--) {
         uint8_t d = *data++;
         gu126x64d_xmit_raw_byte(g, d);
         if (d == 0x60)
             gu126x64d_xmit_raw_byte(g, d);
     }
+    gu126x64d_ss_deassert(g, delay);
 }
 
 

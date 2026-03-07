@@ -84,8 +84,10 @@ class GU126X64D:
         display = self.printer.lookup_object('display', None)
         if display is not None:
             display.request_redraw()
-    def _send_cmds(self, cmds, minclock=0):
-        self.send_cmds_cmd.send([self.oid, cmds], minclock=minclock)
+    def _send_cmds(self, cmds, minclock=0,
+                   reqclock=BACKGROUND_PRIORITY_CLOCK):
+        self.send_cmds_cmd.send([self.oid, cmds], minclock=minclock,
+                                reqclock=reqclock)
     def _set_test_pattern(self, pattern):
         self.test_pattern = pattern
         self._request_redraw()
@@ -188,11 +190,10 @@ class GU126X64D:
             # Transmit changes
             for col_pos, count in diffs:
                 y = page * 8
-                packet = [0x10, col_pos, y, 0x18, count]
+                self._send_cmds([0x10, col_pos, y])
+                packet = [0x18, count]
                 packet.extend(new_data[col_pos:col_pos + count])
-                self.send_cmds_cmd.send(
-                    [self.oid, packet],
-                    reqclock=BACKGROUND_PRIORITY_CLOCK)
+                self._send_cmds(packet)
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
