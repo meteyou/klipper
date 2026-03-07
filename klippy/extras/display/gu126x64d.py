@@ -86,8 +86,8 @@ class GU126X64D:
         # Software Reset (0x19)
         self.send_cmds_cmd.send([self.oid, [0x19]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Write Mode: 0x1A, 0x00 (diagnostic: horizontal orientation)
-        self.send_cmds_cmd.send([self.oid, [0x1A, 0x00]],
+        # Write Mode: 0x1A, 0x80 (vertical orientation, horizontal cursor)
+        self.send_cmds_cmd.send([self.oid, [0x1A, 0x80]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
         # Brightness: 0x1B, 0xF8 + brightness (1-8 → 0xF9-0xFF)
         self.send_cmds_cmd.send([self.oid, [0x1B, 0xF8 + self.brightness]],
@@ -125,13 +125,14 @@ class GU126X64D:
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
-        # Convert from "rows of pixels" format to "columns of pixels"
+        # Convert from "rows of pixels" to "columns of pixels"
+        # GU126x64D uses Bit7=top, Bit0=bottom in vertical write mode.
         top = bot = 0
         for row in range(8):
             spaced = (data[row] * 0x8040201008040201) & 0x8080808080808080
-            top |= spaced >> (7 - row)
+            top |= spaced >> row
             spaced = (data[row + 8] * 0x8040201008040201) & 0x8080808080808080
-            bot |= spaced >> (7 - row)
+            bot |= spaced >> row
         bits_top = [(top >> s) & 0xff for s in range(0, 64, 8)]
         bits_bot = [(bot >> s) & 0xff for s in range(0, 64, 8)]
         return (bytearray(bits_top), bytearray(bits_bot))

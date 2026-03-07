@@ -52,9 +52,9 @@ gu126x64d_wait_ready(struct gu126x64d *g)
     }
 }
 
-// Transmit one byte with per-byte /SS framing (SPI Mode 0, MSB first)
+// Transmit one raw byte with per-byte /SS framing (SPI Mode 0, MSB first)
 static void
-gu126x64d_xmit_byte(struct gu126x64d *g, uint8_t data)
+gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
 {
     struct gpio_out sck = g->sck, sin = g->sin, ss = g->ss;
     uint32_t delay = nsecs_to_ticks(125);
@@ -79,6 +79,17 @@ gu126x64d_xmit_byte(struct gu126x64d *g, uint8_t data)
 
     // Deassert /SS
     gpio_out_write(ss, 1);
+}
+
+// Transmit one byte, escaping 0x60 by sending it twice. The display uses
+// 0x60 as a special prefix in hex/ascii modes, so literal 0x60 graphic data
+// must be doubled.
+static void
+gu126x64d_xmit_byte(struct gu126x64d *g, uint8_t data)
+{
+    gu126x64d_xmit_raw_byte(g, data);
+    if (data == 0x60)
+        gu126x64d_xmit_raw_byte(g, data);
 }
 
 // Transmit a series of bytes
