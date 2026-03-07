@@ -210,8 +210,7 @@ class GU126X64D:
             # Transmit changes
             for col_pos, count in diffs:
                 y = page * 8
-                self._send_cmds([0x10, col_pos, y])
-                packet = [0x18, count]
+                packet = [0x10, col_pos, y, 0x18, count]
                 packet.extend(new_data[col_pos:col_pos + count])
                 self._send_cmds(packet)
             old_data[:] = new_data
