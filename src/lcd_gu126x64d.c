@@ -16,7 +16,11 @@ struct gu126x64d {
     struct gpio_out sck, sin, ss, hb;
     struct gpio_in mb;
     uint32_t delay_ticks;
+    uint8_t flags;
 };
+
+#define GU126X64D_LSB_FIRST   0x01
+#define GU126X64D_FALLING_EDGE 0x02
 
 
 /****************************************************************
@@ -68,6 +72,7 @@ gu126x64d_wait_busy(struct gu126x64d *g)
 static __always_inline void
 gu126x64d_ss_assert(struct gu126x64d *g, uint32_t delay)
 {
+    gpio_out_write(g->sck, (g->flags & GU126X64D_FALLING_EDGE) ? 1 : 0);
     gpio_out_write(g->ss, 0);
     ndelay(delay);
 }
@@ -79,24 +84,34 @@ gu126x64d_ss_deassert(struct gu126x64d *g, uint32_t delay)
     gpio_out_write(g->ss, 1);
 }
 
-// Clock out one raw byte with /SS already asserted (SPI mode 0, MSB first).
-// Use a conservative clock to reduce parser/timing sensitivity while
-// debugging this display.
+// Clock out one raw byte with /SS already asserted. The bit order and active
+// sampling edge are configurable to allow quick testing against module setup.
 static void
 gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
 {
     struct gpio_out sck = g->sck, sin = g->sin;
     uint32_t delay = nsecs_to_ticks(1000);
+    uint8_t falling = !!(g->flags & GU126X64D_FALLING_EDGE);
+    uint8_t lsb_first = !!(g->flags & GU126X64D_LSB_FIRST);
 
     gu126x64d_wait_ready(g);
     uint8_t i;
     for (i = 0; i < 8; i++) {
-        gpio_out_write(sin, (data >> 7) & 1);
-        data <<= 1;
+        gpio_out_write(sin, lsb_first ? (data & 1) : ((data >> 7) & 1));
+        if (lsb_first)
+            data >>= 1;
+        else
+            data <<= 1;
         ndelay(delay);
-        gpio_out_write(sck, 1); // Rising edge — data latched by display
-        ndelay(delay);
-        gpio_out_write(sck, 0); // Falling edge
+        if (falling) {
+            gpio_out_write(sck, 0); // Falling edge — data latched by display
+            ndelay(delay);
+            gpio_out_write(sck, 1); // Return to idle high
+        } else {
+            gpio_out_write(sck, 1); // Rising edge — data latched by display
+            ndelay(delay);
+            gpio_out_write(sck, 0); // Return to idle low
+        }
     }
     // The reference implementation waits for the module to acknowledge each
     // byte by asserting busy after the transfer.
@@ -130,7 +145,9 @@ command_config_gu126x64d(uint32_t *args)
 {
     struct gu126x64d *g = oid_alloc(args[0], command_config_gu126x64d,
                                     sizeof(*g));
-    g->sck = gpio_out_setup(args[1], 0);
+    g->flags = args[7];
+    g->sck = gpio_out_setup(args[1],
+                            (g->flags & GU126X64D_FALLING_EDGE) ? 1 : 0);
     g->ss = gpio_out_setup(args[2], 1);  // /SS idle high
     g->sin = gpio_out_setup(args[3], 0);
     g->mb = gpio_in_setup(args[4], 0);
@@ -139,7 +156,7 @@ command_config_gu126x64d(uint32_t *args)
 }
 DECL_COMMAND(command_config_gu126x64d,
              "config_gu126x64d oid=%c sck_pin=%u ss_pin=%u sin_pin=%u"
-             " mb_pin=%u hb_pin=%u delay_ticks=%u");
+             " mb_pin=%u hb_pin=%u delay_ticks=%u flags=%u");
 
 void
 command_gu126x64d_send_cmds(uint32_t *args)
@@ -167,7 +184,8 @@ gu126x64d_shutdown(void)
     uint8_t i;
     struct gu126x64d *g;
     foreach_oid(i, g, command_config_gu126x64d) {
-        gpio_out_write(g->sck, 0);
+        gpio_out_write(g->sck,
+                       (g->flags & GU126X64D_FALLING_EDGE) ? 1 : 0);
         gpio_out_write(g->sin, 0);
         gpio_out_write(g->ss, 0);
         gpio_out_write(g->hb, 0);

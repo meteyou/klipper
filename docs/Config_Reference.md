@@ -4703,6 +4703,12 @@ hb_pin:
 #brightness:
 #   The display brightness level. The value may range from 1 to 7 and
 #   the default is 7.
+#spi_bit_order:
+#   The serial bit order. One of `msb_first` or `lsb_first`.
+#   The default is `msb_first`.
+#spi_clock_edge:
+#   The serial sampling edge. One of `rising` or `falling`.
+#   The default is `rising`.
 ...
 ```
 

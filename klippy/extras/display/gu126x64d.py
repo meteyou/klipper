@@ -42,6 +42,13 @@ class GU126X64D:
         self.rst_pin = config.get("rst_pin", None)
         # Display settings
         self.brightness = config.getint('brightness', 7, minval=1, maxval=7)
+        bit_order_map = {'msb_first': 0, 'lsb_first': 1}
+        edge_map = {'rising': 0, 'falling': 2}
+        self.spi_flags = (
+            config.getchoice('spi_bit_order', bit_order_map,
+                             default='msb_first')
+            | config.getchoice('spi_clock_edge', edge_map,
+                               default='rising'))
         # Framebuffer: 8 pages × 128 columns (only 126 sent to display)
         self.columns = 128
         self.vram = [bytearray(self.columns) for i in range(8)]
@@ -55,10 +62,11 @@ class GU126X64D:
     def build_config(self):
         self.mcu.add_config_cmd(
             "config_gu126x64d oid=%d sck_pin=%s ss_pin=%s sin_pin=%s"
-            " mb_pin=%s hb_pin=%s delay_ticks=%d" % (
+            " mb_pin=%s hb_pin=%s delay_ticks=%d flags=%d" % (
                 self.oid, self.pins[0], self.pins[1], self.pins[2],
                 self.pins[3], self.pins[4],
-                self.mcu.seconds_to_clock(GU126X64D_DATA_DELAY)))
+                self.mcu.seconds_to_clock(GU126X64D_DATA_DELAY),
+                self.spi_flags))
         cmd_queue = self.mcu.alloc_command_queue()
         self.send_cmds_cmd = self.mcu.lookup_command(
             "gu126x64d_send_cmds oid=%c cmds=%*s", cq=cmd_queue)
