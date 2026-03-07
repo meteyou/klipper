@@ -54,11 +54,13 @@ gu126x64d_wait_ready(struct gu126x64d *g)
 }
 
 // Transmit one raw byte with per-byte /SS framing (SPI mode 0, MSB first).
+// Use a conservative clock to reduce parser/timing sensitivity while
+// debugging this display.
 static void
 gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
 {
     struct gpio_out sck = g->sck, sin = g->sin, ss = g->ss;
-    uint32_t delay = nsecs_to_ticks(125);
+    uint32_t delay = nsecs_to_ticks(1000);
 
     gu126x64d_wait_ready(g);
     gpio_out_write(ss, 0);

@@ -84,6 +84,8 @@ class GU126X64D:
         display = self.printer.lookup_object('display', None)
         if display is not None:
             display.request_redraw()
+    def _send_cmds(self, cmds, minclock=0):
+        self.send_cmds_cmd.send([self.oid, cmds], minclock=minclock)
     def _set_test_pattern(self, pattern):
         self.test_pattern = pattern
         self._request_redraw()
@@ -134,10 +136,12 @@ class GU126X64D:
             self._write_text_to_vram(0, 2, b'AaMmWw#@[]{}()<>')
             self._write_text_to_vram(0, 3, b'bit7 top? bit0?')
     def init(self):
+        reactor = self.printer.get_reactor()
+        curtime = reactor.monotonic()
+        print_time = self.mcu.estimated_print_time(curtime)
+        init_time = print_time
         # Hardware reset via /RES pin
         if self.mcu_reset is not None:
-            curtime = self.printer.get_reactor().monotonic()
-            print_time = self.mcu.estimated_print_time(curtime)
             # Toggle reset: low for 100ms, then high, wait 300ms
             minclock = self.mcu.print_time_to_clock(print_time + .100)
             self.mcu_reset.update_digital_out(0, minclock=minclock)
@@ -145,18 +149,24 @@ class GU126X64D:
             self.mcu_reset.update_digital_out(1, minclock=minclock)
             minclock = self.mcu.print_time_to_clock(print_time + .300)
             self.mcu_reset.update_digital_out(1, minclock=minclock)
-        # Software Reset (0x19)
-        self.send_cmds_cmd.send([self.oid, [0x19]],
-                                reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Write Mode: 0x1A, 0x80 (vertical orientation, horizontal cursor)
-        self.send_cmds_cmd.send([self.oid, [0x1A, 0x80]],
-                                reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Brightness: 0x1B, 0xF8 + brightness (1-7 -> 0xF9-0xFF)
-        self.send_cmds_cmd.send([self.oid, [0x1B, 0xF8 + self.brightness]],
-                                reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Clear display area
-        self.send_cmds_cmd.send([self.oid, [0x12, 0, 0, 125, 63]],
-                                reqclock=BACKGROUND_PRIORITY_CLOCK)
+            init_time = print_time + .320
+        # Schedule init commands conservatively so reset/clear/write-mode
+        # transitions have time to settle on the module.
+        self._send_cmds([0x19],
+                        minclock=self.mcu.print_time_to_clock(init_time))
+        self._send_cmds([0x1A, 0x80],
+                        minclock=self.mcu.print_time_to_clock(
+                            init_time + .010))
+        self._send_cmds([0x1B, 0xF8 + self.brightness],
+                        minclock=self.mcu.print_time_to_clock(
+                            init_time + .020))
+        self._send_cmds([0x12, 0, 0, 125, 63],
+                        minclock=self.mcu.print_time_to_clock(
+                            init_time + .030))
+        self._send_cmds([0x1A, 0x80],
+                        minclock=self.mcu.print_time_to_clock(
+                            init_time + .040))
+        reactor.pause(reactor.monotonic() + .080)
         self.flush()
     def flush(self):
         # Differential update — only send changed regions per page
@@ -239,9 +249,11 @@ class GU126X64D:
     # Brightness G-Code
     def _set_brightness(self, brightness):
         self.brightness = brightness
-        self.send_cmds_cmd.send(
-            [self.oid, [0x1B, 0xF8 + brightness]],
-            reqclock=BACKGROUND_PRIORITY_CLOCK)
+        self._send_cmds([0x1B, 0xF8 + brightness],
+                        minclock=self.mcu.print_time_to_clock(
+                            self.mcu.estimated_print_time(
+                                self.printer.get_reactor().monotonic())
+                            + .010))
     cmd_SET_DISPLAY_BRIGHTNESS_help = "Set VFD display brightness (1-7)"
     def cmd_SET_DISPLAY_BRIGHTNESS(self, gcmd):
         brightness = gcmd.get_int('BRIGHTNESS', minval=1, maxval=7)
