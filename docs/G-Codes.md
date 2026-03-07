@@ -329,6 +329,14 @@ gu126x64d VFD display. The BRIGHTNESS parameter must be between 1
 (dimmest) and 8 (brightest). Only available when the display
 `lcd_type` is `gu126x64d`.
 
+#### SET_GU126X64D_TEST_PATTERN
+`SET_GU126X64D_TEST_PATTERN PATTERN=<name>`: Enable a built-in
+GU126x64D test pattern for transport and pixel-mapping debugging.
+Use `PATTERN=off` to return to the normal Klipper UI. Supported
+patterns are `solid`, `vertical_stripes`, `horizontal_stripes`,
+`checker`, `topbit`, `botbit`, `pagebytes`, and `font`. Only
+available when the display `lcd_type` is `gu126x64d`.
+
 ### [display_status]
 
 The display_status module is automatically loaded if a

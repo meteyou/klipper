@@ -15,6 +15,11 @@ GU126X64D_DATA_DELAY = .000350  # 350us per graphic data byte
 
 TextGlyphs = { 'right_arrow': b'\x1a', 'degrees': b'\xf8' }
 
+TEST_PATTERNS = {
+    'solid', 'vertical_stripes', 'horizontal_stripes', 'checker',
+    'topbit', 'botbit', 'pagebytes', 'font'
+}
+
 
 class GU126X64D:
     def __init__(self, config):
@@ -46,6 +51,7 @@ class GU126X64D:
         self.font = [self._swizzle_bits(bytearray(c))
                      for c in font8x14.VGA_FONT]
         self.icons = {}
+        self.test_pattern = None
     def build_config(self):
         self.mcu.add_config_cmd(
             "config_gu126x64d oid=%d sck_pin=%s ss_pin=%s sin_pin=%s"
@@ -65,12 +71,68 @@ class GU126X64D:
         gcode.register_command('SET_DISPLAY_BRIGHTNESS',
                                self.cmd_SET_DISPLAY_BRIGHTNESS,
                                desc=self.cmd_SET_DISPLAY_BRIGHTNESS_help)
+        gcode.register_command('SET_GU126X64D_TEST_PATTERN',
+                               self.cmd_SET_GU126X64D_TEST_PATTERN,
+                               desc=self.cmd_SET_GU126X64D_TEST_PATTERN_help)
     def _setup_reset(self, cmd_queue):
         self.mcu_reset = None
         if self.rst_pin is None:
             return
         self.mcu_reset = bus.MCU_bus_digital_out(
             self.mcu, self.rst_pin, cmd_queue)
+    def _request_redraw(self):
+        display = self.printer.lookup_object('display', None)
+        if display is not None:
+            display.request_redraw()
+    def _set_test_pattern(self, pattern):
+        self.test_pattern = pattern
+        self._request_redraw()
+    def _write_text_to_vram(self, x, y, data):
+        if x + len(data) > 16:
+            data = data[:16 - min(x, 16)]
+        pix_x = x * 8
+        page_top = self.vram[y * 2]
+        page_bot = self.vram[y * 2 + 1]
+        for c in bytearray(data):
+            bits_top, bits_bot = self.font[c]
+            page_top[pix_x:pix_x + 8] = bits_top
+            page_bot[pix_x:pix_x + 8] = bits_bot
+            pix_x += 8
+    def _write_graphics_to_vram(self, x, y, data):
+        if x >= 16 or y >= 4 or len(data) != 16:
+            return
+        bits_top, bits_bot = self._swizzle_bits(data)
+        pix_x = x * 8
+        page_top = self.vram[y * 2]
+        page_bot = self.vram[y * 2 + 1]
+        for i in range(8):
+            page_top[pix_x + i] ^= bits_top[i]
+            page_bot[pix_x + i] ^= bits_bot[i]
+    def _fill_test_pattern(self):
+        for page_idx, page in enumerate(self.vram):
+            for col in range(self.columns):
+                if self.test_pattern == 'solid':
+                    val = 0xff
+                elif self.test_pattern == 'vertical_stripes':
+                    val = 0xff if (col & 1) else 0x00
+                elif self.test_pattern == 'horizontal_stripes':
+                    val = 0xaa
+                elif self.test_pattern == 'checker':
+                    val = 0xaa if (col & 1) else 0x55
+                elif self.test_pattern == 'topbit':
+                    val = 0x80
+                elif self.test_pattern == 'botbit':
+                    val = 0x01
+                elif self.test_pattern == 'pagebytes':
+                    val = (0x80, 0x01, 0xaa, 0x55)[page_idx & 3]
+                else:
+                    val = 0x00
+                page[col] = val
+        if self.test_pattern == 'font':
+            self._write_text_to_vram(0, 0, b'0123456789ABCDEF')
+            self._write_text_to_vram(0, 1, b'FEDCBA9876543210')
+            self._write_text_to_vram(0, 2, b'AaMmWw#@[]{}()<>')
+            self._write_text_to_vram(0, 3, b'bit7 top? bit0?')
     def init(self):
         # Hardware reset via /RES pin
         if self.mcu_reset is not None:
@@ -144,27 +206,16 @@ class GU126X64D:
                 top2, bot2 = self._swizzle_bits(icon[1])
                 self.icons[glyph_name] = (top1 + top2, bot1 + bot2)
     def write_text(self, x, y, data):
-        if x + len(data) > 16:
-            data = data[:16 - min(x, 16)]
-        pix_x = x * 8
-        page_top = self.vram[y * 2]
-        page_bot = self.vram[y * 2 + 1]
-        for c in bytearray(data):
-            bits_top, bits_bot = self.font[c]
-            page_top[pix_x:pix_x + 8] = bits_top
-            page_bot[pix_x:pix_x + 8] = bits_bot
-            pix_x += 8
-    def write_graphics(self, x, y, data):
-        if x >= 16 or y >= 4 or len(data) != 16:
+        if self.test_pattern is not None:
             return
-        bits_top, bits_bot = self._swizzle_bits(data)
-        pix_x = x * 8
-        page_top = self.vram[y * 2]
-        page_bot = self.vram[y * 2 + 1]
-        for i in range(8):
-            page_top[pix_x + i] ^= bits_top[i]
-            page_bot[pix_x + i] ^= bits_bot[i]
+        self._write_text_to_vram(x, y, data)
+    def write_graphics(self, x, y, data):
+        if self.test_pattern is not None:
+            return
+        self._write_graphics_to_vram(x, y, data)
     def write_glyph(self, x, y, glyph_name):
+        if self.test_pattern is not None:
+            return 0
         icon = self.icons.get(glyph_name)
         if icon is not None and x < 15:
             pix_x = x * 8
@@ -181,6 +232,8 @@ class GU126X64D:
         zeros = bytearray(self.columns)
         for page in self.vram:
             page[:] = zeros
+        if self.test_pattern is not None:
+            self._fill_test_pattern()
     def get_dimensions(self):
         return (16, 4)
     # Brightness G-Code
@@ -193,3 +246,16 @@ class GU126X64D:
     def cmd_SET_DISPLAY_BRIGHTNESS(self, gcmd):
         brightness = gcmd.get_int('BRIGHTNESS', minval=1, maxval=8)
         self._set_brightness(brightness)
+    cmd_SET_GU126X64D_TEST_PATTERN_help = (
+        "Enable a GU126x64D test pattern or PATTERN=off to disable")
+    def cmd_SET_GU126X64D_TEST_PATTERN(self, gcmd):
+        pattern = gcmd.get('PATTERN').strip().lower()
+        if pattern == 'off':
+            self._set_test_pattern(None)
+            gcmd.respond_info('GU126x64D test pattern disabled')
+            return
+        if pattern not in TEST_PATTERNS:
+            raise gcmd.error(
+                "Unknown GU126x64D test pattern '%s'" % (pattern,))
+        self._set_test_pattern(pattern)
+        gcmd.respond_info("GU126x64D test pattern '%s' enabled" % (pattern,))
