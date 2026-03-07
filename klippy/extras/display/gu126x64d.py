@@ -208,10 +208,11 @@ class GU126X64D:
                     del diffs[i + 1]
             # Transmit changes
             for col_pos, count in diffs:
-                y = page
+                y = page * 8
+                self._send_raw_cmds([0x1A, 0x80])
                 packet = [0x10, col_pos, y, 0x18, count]
                 packet.extend(new_data[col_pos:col_pos + count])
-                self._send_cmds(packet)
+                self._send_raw_cmds(packet)
             old_data[:] = new_data
     # Framebuffer methods (same as uc1701.DisplayBase)
     def _swizzle_bits(self, data):
