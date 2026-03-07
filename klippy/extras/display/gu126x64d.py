@@ -166,7 +166,6 @@ class GU126X64D:
         self._send_cmds([0x1A, 0x80],
                         minclock=self.mcu.print_time_to_clock(
                             init_time + .040))
-        reactor.pause(reactor.monotonic() + .080)
         self.flush()
     def flush(self):
         # Differential update — only send changed regions per page
