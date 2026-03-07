@@ -89,11 +89,18 @@ class GU126X64D:
         for b in bytearray(cmds):
             out.extend((0x60, ord('%X' % (b >> 4)), ord('%X' % (b & 0x0f))))
         return out
-    def _send_cmds(self, cmds, minclock=0,
-                   reqclock=BACKGROUND_PRIORITY_CLOCK):
+    def _send_raw_cmds(self, cmds, minclock=0,
+                       reqclock=BACKGROUND_PRIORITY_CLOCK):
+        self.send_cmds_cmd.send([self.oid, cmds], minclock=minclock,
+                                reqclock=reqclock)
+    def _send_hex_cmds(self, cmds, minclock=0,
+                       reqclock=BACKGROUND_PRIORITY_CLOCK):
         self.send_cmds_cmd.send(
             [self.oid, self._encode_hex_bytes(cmds)],
             minclock=minclock, reqclock=reqclock)
+    def _send_cmds(self, cmds, minclock=0,
+                   reqclock=BACKGROUND_PRIORITY_CLOCK):
+        self._send_raw_cmds(cmds, minclock=minclock, reqclock=reqclock)
     def _set_test_pattern(self, pattern):
         self.test_pattern = pattern
         self._request_redraw()
@@ -160,20 +167,27 @@ class GU126X64D:
             init_time = print_time + .320
         # Schedule init commands conservatively so reset/clear/write-mode
         # transitions have time to settle on the module.
-        self._send_cmds([0x19],
-                        minclock=self.mcu.print_time_to_clock(init_time))
-        self._send_cmds([0x1A, 0x80],
-                        minclock=self.mcu.print_time_to_clock(
-                            init_time + .010))
-        self._send_cmds([0x1B, 0xF8 + self.brightness],
-                        minclock=self.mcu.print_time_to_clock(
-                            init_time + .020))
-        self._send_cmds([0x12, 0, 0, 125, 63],
-                        minclock=self.mcu.print_time_to_clock(
-                            init_time + .030))
-        self._send_cmds([0x1A, 0x80],
-                        minclock=self.mcu.print_time_to_clock(
-                            init_time + .040))
+        # Bootstrap from the module's default hex-receive mode into raw mode.
+        self._send_hex_cmds([0x1B, 0x42],
+                            minclock=self.mcu.print_time_to_clock(init_time))
+        self._send_raw_cmds([0x1B, 0x50],
+                            minclock=self.mcu.print_time_to_clock(
+                                init_time + .010))
+        self._send_raw_cmds([0x19],
+                            minclock=self.mcu.print_time_to_clock(
+                                init_time + .020))
+        self._send_raw_cmds([0x1A, 0x80],
+                            minclock=self.mcu.print_time_to_clock(
+                                init_time + .030))
+        self._send_raw_cmds([0x1B, 0xF8 + self.brightness],
+                            minclock=self.mcu.print_time_to_clock(
+                                init_time + .040))
+        self._send_raw_cmds([0x12, 0, 0, 125, 63],
+                            minclock=self.mcu.print_time_to_clock(
+                                init_time + .050))
+        self._send_raw_cmds([0x1A, 0x80],
+                            minclock=self.mcu.print_time_to_clock(
+                                init_time + .060))
         self.flush()
     def flush(self):
         # Differential update — only send changed regions per page
