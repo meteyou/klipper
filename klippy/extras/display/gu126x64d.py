@@ -165,29 +165,19 @@ class GU126X64D:
             minclock = self.mcu.print_time_to_clock(print_time + .300)
             self.mcu_reset.update_digital_out(1, minclock=minclock)
             init_time = print_time + .320
-        # Schedule init commands conservatively so reset/clear/write-mode
-        # transitions have time to settle on the module.
-        # Bootstrap from the module's default hex-receive mode into raw mode.
+        # Reference-style init: reset first, then write mode immediately.
+        # Bootstrap out of hex-receive mode only once before raw traffic.
         self._send_hex_cmds([0x1B, 0x42],
                             minclock=self.mcu.print_time_to_clock(init_time))
-        self._send_raw_cmds([0x1B, 0x50],
-                            minclock=self.mcu.print_time_to_clock(
-                                init_time + .010))
         self._send_raw_cmds([0x19],
                             minclock=self.mcu.print_time_to_clock(
-                                init_time + .020))
+                                init_time + .010))
         self._send_raw_cmds([0x1A, 0x80],
                             minclock=self.mcu.print_time_to_clock(
-                                init_time + .030))
+                                init_time + .020))
         self._send_raw_cmds([0x1B, 0xF8 + self.brightness],
                             minclock=self.mcu.print_time_to_clock(
-                                init_time + .040))
-        self._send_raw_cmds([0x12, 0, 0, 125, 63],
-                            minclock=self.mcu.print_time_to_clock(
-                                init_time + .050))
-        self._send_raw_cmds([0x1A, 0x80],
-                            minclock=self.mcu.print_time_to_clock(
-                                init_time + .060))
+                                init_time + .030))
         self.flush()
     def flush(self):
         # Differential update — only send changed regions per page
