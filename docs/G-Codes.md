@@ -326,7 +326,7 @@ primary display).
 #### SET_DISPLAY_BRIGHTNESS
 `SET_DISPLAY_BRIGHTNESS BRIGHTNESS=<value>`: Set the brightness of a
 gu126x64d VFD display. The BRIGHTNESS parameter must be between 1
-(dimmest) and 8 (brightest). Only available when the display
+(dimmest) and 7 (brightest). Only available when the display
 `lcd_type` is `gu126x64d`.
 
 #### SET_GU_DISPLAY_TEST_PATTERN

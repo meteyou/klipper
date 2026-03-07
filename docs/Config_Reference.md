@@ -4701,7 +4701,7 @@ hb_pin:
 #   The pin connected to the reset (/RES) pin on the display. If it
 #   is not specified then no hardware reset will be performed.
 #brightness:
-#   The display brightness level. The value may range from 1 to 8 and
+#   The display brightness level. The value may range from 1 to 7 and
 #   the default is 7.
 ...
 ```

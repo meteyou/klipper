@@ -41,7 +41,7 @@ class GU126X64D:
         # Reset pin (optional, independent of the SPI driver)
         self.rst_pin = config.get("rst_pin", None)
         # Display settings
-        self.brightness = config.getint('brightness', 7, minval=1, maxval=8)
+        self.brightness = config.getint('brightness', 7, minval=1, maxval=7)
         # Framebuffer: 8 pages × 128 columns (only 126 sent to display)
         self.columns = 128
         self.vram = [bytearray(self.columns) for i in range(8)]
@@ -151,7 +151,7 @@ class GU126X64D:
         # Write Mode: 0x1A, 0x80 (vertical orientation, horizontal cursor)
         self.send_cmds_cmd.send([self.oid, [0x1A, 0x80]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
-        # Brightness: 0x1B, 0xF8 + brightness (1-8 → 0xF9-0xFF)
+        # Brightness: 0x1B, 0xF8 + brightness (1-7 -> 0xF9-0xFF)
         self.send_cmds_cmd.send([self.oid, [0x1B, 0xF8 + self.brightness]],
                                 reqclock=BACKGROUND_PRIORITY_CLOCK)
         # Clear display area
@@ -242,9 +242,9 @@ class GU126X64D:
         self.send_cmds_cmd.send(
             [self.oid, [0x1B, 0xF8 + brightness]],
             reqclock=BACKGROUND_PRIORITY_CLOCK)
-    cmd_SET_DISPLAY_BRIGHTNESS_help = "Set VFD display brightness (1-8)"
+    cmd_SET_DISPLAY_BRIGHTNESS_help = "Set VFD display brightness (1-7)"
     def cmd_SET_DISPLAY_BRIGHTNESS(self, gcmd):
-        brightness = gcmd.get_int('BRIGHTNESS', minval=1, maxval=8)
+        brightness = gcmd.get_int('BRIGHTNESS', minval=1, maxval=7)
         self._set_brightness(brightness)
     cmd_SET_GU_DISPLAY_TEST_PATTERN_help = (
         "Enable a GU126x64D test pattern or PATTERN=off to disable")
