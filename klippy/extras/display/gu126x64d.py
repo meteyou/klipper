@@ -84,10 +84,16 @@ class GU126X64D:
         display = self.printer.lookup_object('display', None)
         if display is not None:
             display.request_redraw()
+    def _encode_hex_bytes(self, cmds):
+        out = []
+        for b in bytearray(cmds):
+            out.extend((0x60, ord('%X' % (b >> 4)), ord('%X' % (b & 0x0f))))
+        return out
     def _send_cmds(self, cmds, minclock=0,
                    reqclock=BACKGROUND_PRIORITY_CLOCK):
-        self.send_cmds_cmd.send([self.oid, cmds], minclock=minclock,
-                                reqclock=reqclock)
+        self.send_cmds_cmd.send(
+            [self.oid, self._encode_hex_bytes(cmds)],
+            minclock=minclock, reqclock=reqclock)
     def _set_test_pattern(self, pattern):
         self.test_pattern = pattern
         self._request_redraw()

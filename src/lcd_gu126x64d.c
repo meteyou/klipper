@@ -104,7 +104,8 @@ gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
 }
 
 // Transmit one full command packet while keeping /SS low across the entire
-// packet. Escape literal 0x60 by sending it twice inside the packet.
+// packet. Bytes are sent raw; any higher-level hex encoding is handled by the
+// host code.
 static void
 gu126x64d_xmit(struct gu126x64d *g, uint8_t len, uint8_t *data)
 {
@@ -115,8 +116,6 @@ gu126x64d_xmit(struct gu126x64d *g, uint8_t len, uint8_t *data)
     while (len--) {
         uint8_t d = *data++;
         gu126x64d_xmit_raw_byte(g, d);
-        if (d == 0x60)
-            gu126x64d_xmit_raw_byte(g, d);
     }
     gu126x64d_ss_deassert(g, delay);
 }
