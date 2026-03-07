@@ -71,9 +71,9 @@ class GU126X64D:
         gcode.register_command('SET_DISPLAY_BRIGHTNESS',
                                self.cmd_SET_DISPLAY_BRIGHTNESS,
                                desc=self.cmd_SET_DISPLAY_BRIGHTNESS_help)
-        gcode.register_command('SET_GU126X64D_TEST_PATTERN',
-                               self.cmd_SET_GU126X64D_TEST_PATTERN,
-                               desc=self.cmd_SET_GU126X64D_TEST_PATTERN_help)
+        gcode.register_command('SET_GU_DISPLAY_TEST_PATTERN',
+                               self.cmd_SET_GU_DISPLAY_TEST_PATTERN,
+                               desc=self.cmd_SET_GU_DISPLAY_TEST_PATTERN_help)
     def _setup_reset(self, cmd_queue):
         self.mcu_reset = None
         if self.rst_pin is None:
@@ -246,9 +246,9 @@ class GU126X64D:
     def cmd_SET_DISPLAY_BRIGHTNESS(self, gcmd):
         brightness = gcmd.get_int('BRIGHTNESS', minval=1, maxval=8)
         self._set_brightness(brightness)
-    cmd_SET_GU126X64D_TEST_PATTERN_help = (
+    cmd_SET_GU_DISPLAY_TEST_PATTERN_help = (
         "Enable a GU126x64D test pattern or PATTERN=off to disable")
-    def cmd_SET_GU126X64D_TEST_PATTERN(self, gcmd):
+    def cmd_SET_GU_DISPLAY_TEST_PATTERN(self, gcmd):
         pattern = gcmd.get('PATTERN').strip().lower()
         if pattern == 'off':
             self._set_test_pattern(None)
