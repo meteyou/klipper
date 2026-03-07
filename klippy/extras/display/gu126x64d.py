@@ -165,11 +165,12 @@ class GU126X64D:
             minclock = self.mcu.print_time_to_clock(print_time + .300)
             self.mcu_reset.update_digital_out(1, minclock=minclock)
             init_time = print_time + .320
-        # Reference-style init: reset first, then write mode immediately.
-        # Bootstrap out of hex-receive mode only once before raw traffic.
-        self._send_hex_cmds([0x1B, 0x42],
+        # Current hypothesis: after reset the serial parser returns to hex
+        # receive mode, so send reset in hex, then disable hex mode, then
+        # continue with raw commands.
+        self._send_hex_cmds([0x19],
                             minclock=self.mcu.print_time_to_clock(init_time))
-        self._send_raw_cmds([0x19],
+        self._send_hex_cmds([0x1B, 0x42],
                             minclock=self.mcu.print_time_to_clock(
                                 init_time + .010))
         self._send_raw_cmds([0x1A, 0x80],
