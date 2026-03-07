@@ -41,7 +41,7 @@ ndelay(uint32_t ticks)
 }
 
 // Wait for MB to reach the requested level, with fallback timeout.
-// Current D-module assumption: MB=1 busy, MB=0 ready.
+// Current debug hypothesis: MB=0 busy, MB=1 ready.
 static void
 gu126x64d_wait_mb(struct gu126x64d *g, uint8_t level)
 {
@@ -56,13 +56,13 @@ gu126x64d_wait_mb(struct gu126x64d *g, uint8_t level)
 static __always_inline void
 gu126x64d_wait_ready(struct gu126x64d *g)
 {
-    gu126x64d_wait_mb(g, 0);
+    gu126x64d_wait_mb(g, 1);
 }
 
 static __always_inline void
 gu126x64d_wait_busy(struct gu126x64d *g)
 {
-    gu126x64d_wait_mb(g, 1);
+    gu126x64d_wait_mb(g, 0);
 }
 
 static __always_inline void
