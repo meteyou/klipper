@@ -11,7 +11,7 @@ BACKGROUND_PRIORITY_CLOCK = 0x7fffffff00000000
 
 # Busy delays used by the MCU C driver (for delay_ticks calculation)
 GU126X64D_CMD_DELAY = .000050   # 50us per command byte
-GU126X64D_DATA_DELAY = .000250  # 250us per data byte
+GU126X64D_DATA_DELAY = .000350  # 350us per graphic data byte
 
 TextGlyphs = { 'right_arrow': b'\x1a', 'degrees': b'\xf8' }
 

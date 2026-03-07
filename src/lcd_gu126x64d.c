@@ -40,7 +40,8 @@ ndelay(uint32_t ticks)
         irq_poll();
 }
 
-// Wait for Module Busy (MB) pin to go LOW, with fallback timeout
+// Wait for Module Busy (MB) pin to go LOW, with fallback timeout.
+// Keep existing polarity assumptions from the working D-module setup.
 static void
 gu126x64d_wait_ready(struct gu126x64d *g)
 {
@@ -52,21 +53,28 @@ gu126x64d_wait_ready(struct gu126x64d *g)
     }
 }
 
-// Transmit one raw byte with per-byte /SS framing (SPI Mode 0, MSB first)
+static __always_inline void
+gu126x64d_ss_assert(struct gu126x64d *g, uint32_t delay)
+{
+    gpio_out_write(g->ss, 0);
+    ndelay(delay);
+}
+
+static __always_inline void
+gu126x64d_ss_deassert(struct gu126x64d *g, uint32_t delay)
+{
+    ndelay(delay);
+    gpio_out_write(g->ss, 1);
+}
+
+// Clock out one raw byte with /SS already asserted (SPI mode 0, MSB first).
 static void
 gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
 {
-    struct gpio_out sck = g->sck, sin = g->sin, ss = g->ss;
+    struct gpio_out sck = g->sck, sin = g->sin;
     uint32_t delay = nsecs_to_ticks(125);
 
-    // Wait for module ready
     gu126x64d_wait_ready(g);
-
-    // Assert /SS (active low)
-    gpio_out_write(ss, 0);
-    ndelay(delay);
-
-    // Clock out 8 bits, MSB first
     uint8_t i;
     for (i = 0; i < 8; i++) {
         gpio_out_write(sin, (data >> 7) & 1);
@@ -76,29 +84,24 @@ gu126x64d_xmit_raw_byte(struct gu126x64d *g, uint8_t data)
         ndelay(delay);
         gpio_out_write(sck, 0); // Falling edge
     }
-
-    // Deassert /SS
-    gpio_out_write(ss, 1);
 }
 
-// Transmit one byte, escaping 0x60 by sending it twice. The display uses
-// 0x60 as a special prefix in hex/ascii modes, so literal 0x60 graphic data
-// must be doubled.
-static void
-gu126x64d_xmit_byte(struct gu126x64d *g, uint8_t data)
-{
-    gu126x64d_xmit_raw_byte(g, data);
-    if (data == 0x60)
-        gu126x64d_xmit_raw_byte(g, data);
-}
-
-// Transmit a series of bytes
+// Transmit a packet while keeping /SS low across the entire stream. Escape
+// literal 0x60 bytes by sending them twice.
 static void
 gu126x64d_xmit(struct gu126x64d *g, uint8_t len, uint8_t *data)
 {
+    if (!len)
+        return;
+    uint32_t delay = nsecs_to_ticks(125);
+    gu126x64d_ss_assert(g, delay);
     while (len--) {
-        gu126x64d_xmit_byte(g, *data++);
+        uint8_t d = *data++;
+        gu126x64d_xmit_raw_byte(g, d);
+        if (d == 0x60)
+            gu126x64d_xmit_raw_byte(g, d);
     }
+    gu126x64d_ss_deassert(g, delay);
 }
 
 
