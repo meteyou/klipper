@@ -524,15 +524,22 @@ The following information is available in
 
 [bme280 config_section_name](Config_Reference.md#bmp180bmp280bme280bmp388bme680-temperature-sensor),
 [htu21d config_section_name](Config_Reference.md#htu21d-sensor),
+[sgp40 config_section_name](Config_Reference.md#sgp40-sensor),
 [sht3x config_section_name](Config_Reference.md#sht3x-sensor),
 [lm75 config_section_name](Config_Reference.md#lm75-temperature-sensor),
 [temperature_host config_section_name](Config_Reference.md#host-temperature-sensor)
 and
 [temperature_combined config_section_name](Config_Reference.md#combined-temperature-sensor)
 objects:
-- `temperature`: The last read temperature from the sensor.
+- `temperature`: The last read temperature from the sensor (on sgp40
+  sensors, this is the reference temperature used for compensation).
 - `humidity`, `pressure`, `gas`: The last read values from the sensor
-  (only on bme280, htu21d, sht3x and lm75 sensors).
+  (only on bme280, htu21d, sgp40, sht3x and lm75 sensors). On sgp40
+  sensors, `gas` is the VOC index (1-500, or 0 during the 45 second
+  warmup) and `humidity` is the reference or estimated humidity used
+  for compensation.
+- `gas_raw`: The last raw 16-bit VOC signal reading (only on sgp40
+  sensors).
 
 ## temperature_fan
 

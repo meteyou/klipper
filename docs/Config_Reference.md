@@ -3088,6 +3088,46 @@ sensor_type:
 #   Interval in seconds between readings. Default is 30
 ```
 
+### SGP40 sensor
+
+SGP40 two wire interface (I2C) VOC (volatile organic compounds) gas sensor.
+The sensor does not measure temperature itself; it reports a VOC air
+quality index (1-500, or 0 during the initial 45 second warmup period) and
+raw VOC ticks via the `sgp40 <name>` status object, sampled once per
+second. Optional reference temperature and humidity sensors can be supplied
+to improve the VOC compensation.
+
+```
+sensor_type: SGP40
+#i2c_address:
+#   Default is 89 (0x59).
+#i2c_mcu:
+#i2c_bus:
+#i2c_software_scl_pin:
+#i2c_software_sda_pin:
+#i2c_speed:
+#   See the "common I2C settings" section for a description of the
+#   above parameters.
+#sgp40_ref_temp_sensor:
+#   Name of a configured printer object that reports a "temperature"
+#   status value (for example "temperature_sensor chamber" or
+#   "bme280 chamber"), used as temperature reference for the VOC
+#   compensation. When unset, 25 C is assumed (no compensation).
+#sgp40_ref_humidity_sensor:
+#   Name of a configured printer object that reports a "humidity"
+#   status value (for example "bme280 chamber" or "sht3x chamber";
+#   note that "temperature_sensor" objects do not report humidity),
+#   used as humidity reference for the VOC compensation. When unset,
+#   humidity is estimated from sgp40_ref_temp_sensor assuming 50% RH
+#   at 25 C (or fixed at 50% if no reference temperature sensor is
+#   configured).
+#sgp40_soft_reset_on_startup:
+#   If enabled, sends an I2C General Call soft reset command (address
+#   0x00) on startup to put the sensor into a defined initial state.
+#   Note that this resets all devices on the same I2C bus that support
+#   I2C General Call reset. Default is False.
+```
+
 ### SHT3X sensor
 
 SHT3X family two wire interface (I2C) environmental sensor. These sensors
